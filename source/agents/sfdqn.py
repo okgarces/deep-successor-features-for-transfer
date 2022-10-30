@@ -3,6 +3,7 @@ import random
 import numpy as np
 
 from agents.agent import Agent
+from utils.logger import logger
 
 
 class SFDQN(Agent):
@@ -93,6 +94,11 @@ class SFDQN(Agent):
                     print('test performance: {}'.format('\t'.join(map('{:.4f}'.format, Rs))))
                     avg_R = np.mean(Rs)
                     return_data.append(avg_R)
+                    logger.log_progress(self.get_progress_dict())
+                    logger.log_average_reward(avg_R, self.total_training_steps)
+                    logger.log_accumulative_reward(np.sum(return_data), self.total_training_steps)
+
+                self.total_training_steps += 1
         return return_data
     
     def get_test_action(self, s_enc, w):
