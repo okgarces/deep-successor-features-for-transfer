@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*-
 import random
-import numpy as np
+import torch
 
 from utils.torch import device
 
@@ -142,7 +142,6 @@ class Agent:
     # TRAINING
     # ===========================================================================
     def _epsilon_greedy(self, q):
-        import torch
         q = q.flatten()
         assert q.size()[0] == self.n_actions
         
@@ -173,7 +172,7 @@ class Agent:
     def get_progress_dict(self):
         if self.sf is not None:
             gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-            w_error = np.linalg.norm(self.sf.fit_w[self.task_index] - self.sf.true_w[self.task_index])
+            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index] - self.sf.true_w[self.task_index])
         else:
             gpi_percent = None
             w_error = None
