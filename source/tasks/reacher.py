@@ -1,10 +1,12 @@
 # -*- coding: UTF-8 -*-
-import numpy as np
 from pybulletgym.envs.roboschool.robots.robot_bases import MJCFBasedRobot
 from pybulletgym.envs.roboschool.envs.env_bases import BaseBulletEnv
 from pybulletgym.envs.roboschool.scenes.scene_bases import SingleRobotEmptyScene
+import torch
+import numpy as np
 
 from tasks.task import Task
+from utils.torch import get_torch_device
 
 
 class Reacher(Task):
@@ -22,6 +24,8 @@ class Reacher(Task):
         for a1 in actions:
             for a2 in actions:
                 self.action_dict[len(self.action_dict)] = (a1, a2)
+
+        self.device = get_torch_device()
         
     def clone(self):
         return Reacher(self.target_positions, self.task_index, self.include_target_in_state)
@@ -29,21 +33,25 @@ class Reacher(Task):
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = self.env.reset()
+        state = torch.tensor(self.env.reset()).to(self.device)
         if self.include_target_in_state:
-            return np.concatenate([state.flatten(), self.target_pos])
+            return torch.concat([state.flatten(), self.target_pos]).to(self.device)
         else:
             return state
     
     def action_count(self):
         return len(self.action_dict)
     
-    def transition(self, action):
-        real_action = self.action_dict[action]
+    def transition(self, action: torch.Tensor):
+        action_int = int(action)
+        real_action = self.action_dict[action_int]
         new_state, reward, done, _ = self.env.step(real_action)
+
+        new_state = torch.tensor(new_state).to(self.device)
+        reward = torch.tensor(reward).to(self.device)
         
         if self.include_target_in_state:
-            return_state = np.concatenate([new_state, self.target_pos])
+            return_state = torch.concat([new_state, self.target_pos])
         else:
             return_state = new_state
             
@@ -53,7 +61,7 @@ class Reacher(Task):
     # STATE ENCODING FOR DEEP LEARNING
     # ===========================================================================
     def encode(self, state):
-        return np.array(state).reshape((1, -1))
+        return torch.tensor(state).reshape((1, -1)).to(self.device)
     
     def encode_dim(self):
         if self.include_target_in_state:
@@ -65,9 +73,9 @@ class Reacher(Task):
     # SUCCESSOR FEATURES
     # ===========================================================================
     def features(self, state, action, next_state):
-        phi = np.zeros((len(self.target_positions),))
+        phi = torch.zeros((len(self.target_positions),)).to(self.device)
         for index, target in enumerate(self.target_positions):
-            delta = np.linalg.norm(np.array(self.env.robot.fingertip.pose().xyz()[:2]) - np.array(target))
+            delta = torch.linalg.norm(torch.tensor(self.env.robot.fingertip.pose().xyz()[:2]).to(self.device) - torch.tensor(target).to(self.device))
             phi[index] = 1. - 4. * delta
         return phi
     
@@ -75,7 +83,7 @@ class Reacher(Task):
         return len(self.target_positions)
     
     def get_w(self):
-        w = np.zeros((len(self.target_positions), 1))
+        w = torch.zeros((len(self.target_positions), 1)).to(self.device)
         w[self.task_index, 0] = 1.0
         return w
 
@@ -96,8 +104,8 @@ class ReacherBulletEnv(BaseBulletEnv):
 
         state = self.robot.calc_state()  # sets self.to_target_vec
         
-        delta = np.linalg.norm(
-            np.array(self.robot.fingertip.pose().xyz()) - np.array(self.robot.target.pose().xyz()))
+        delta = torch.linalg.norm(
+            torch.Tensor(self.robot.fingertip.pose().xyz()) - np.array(self.robot.target.pose().xyz()))
         reward = 1. - 4. * delta
         self.HUD(state, a, False)
         
@@ -128,6 +136,7 @@ class ReacherRobot(MJCFBasedRobot):
         self.elbow_joint.reset_current_position(self.np_random.uniform(low=-3.14 / 2, high=3.14 / 2), 0)
 
     def apply_action(self, a):
+        # Here np is ok. To apply a tuple real action to env.
         assert (np.isfinite(a).all())
         self.central_joint.set_motor_torque(0.05 * float(np.clip(a[0], -1, +1)))
         self.elbow_joint.set_motor_torque(0.05 * float(np.clip(a[1], -1, +1)))
@@ -138,7 +147,7 @@ class ReacherRobot(MJCFBasedRobot):
         # target_x, _ = self.jdict["target_x"].current_position()
         # target_y, _ = self.jdict["target_y"].current_position()
         self.to_target_vec = np.array(self.fingertip.pose().xyz()) - np.array(self.target.pose().xyz())
-        return np.array([
+        return torch.Tensor([
             theta,
             self.theta_dot,
             self.gamma,

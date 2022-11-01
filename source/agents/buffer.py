@@ -1,5 +1,8 @@
 # -*- coding: UTF-8 -*-
 import numpy as np
+import torch
+
+from utils.torch import get_torch_device
 
 
 class ReplayBuffer:
@@ -17,6 +20,8 @@ class ReplayBuffer:
         """
         self.n_samples = n_samples
         self.n_batch = n_batch
+
+        self.device = get_torch_device()
     
     def reset(self):
         """
@@ -33,43 +38,43 @@ class ReplayBuffer:
         
         Returns
         -------
-        states : np.ndarray
+        states : torch.Tensor
             a collection of starting states of shape [n_batch, -1]
-        actions : np.ndarray
+        actions : torch.Tensor
             a collection of actions taken in the starting states of shape [n_batch,]
-        rewards : np.ndarray:
+        rewards : torch.Tensor:
             a collection of rewards (for DQN) or features (for SFDQN) obtained of shape [n_batch, -1]
-        next_states : np.ndarray
+        next_states : torch.Tensor
             a collection of successor states of shape [n_batch, -1]
-        gammas : np.ndarray
+        gammas : torch.Tensor
             a collection of discount factors to be applied in computing targets for training of shape [n_batch,]
         """
         if self.size < self.n_batch: return None
         indices = np.random.randint(low=0, high=self.size, size=(self.n_batch,))
         states, actions, rewards, next_states, gammas = zip(*self.buffer[indices])
-        states = np.vstack(states)
-        actions = np.array(actions)
-        rewards = np.vstack(rewards)
-        next_states = np.vstack(next_states)
-        gammas = np.array(gammas)
+        states = torch.vstack(states).to(self.device)
+        actions = torch.tensor(actions).to(self.device)
+        rewards = torch.vstack(rewards).to(self.device)
+        next_states = torch.vstack(next_states).to(self.device)
+        gammas = torch.tensor(gammas).to(self.device)
         return states, actions, rewards, next_states, gammas
     
-    def append(self, state, action, reward, next_state, gamma):
+    def append(self, state: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, next_state: torch.Tensor, gamma: torch.Tensor) -> None:
         """
         Adds the specified sample to the replay buffer. If the buffer is full, then the earliest added
         sample is removed, and the new sample is added.
         
         Parameters
         ----------
-        state : np.ndarray
+        state : torch.Tensor
             the encoded state of the task
         action : integer
             the action taken in state
-        reward : float or np.ndarray
+        reward : torch.Tensor
             the reward obtained in the current transition (for DQN) or state features (for SFDQN)
-        next_state : np.ndarray
+        next_state : torch.Tensor
             the encoded successor state
-        gamma : floag
+        gamma : float
             the effective discount factor to be applied in computing targets for training
         """
         self.buffer[self.index] = (state, action, reward, next_state, gamma)

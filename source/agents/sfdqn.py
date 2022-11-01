@@ -1,13 +1,15 @@
 # -*- coding: UTF-8 -*-
 import random
 import numpy as np
+import torch
 
 from agents.agent import Agent
-from utils.logger import logger
+from utils.logger import get_logger_level
+from utils.torch import get_torch_device
 
 
 class SFDQN(Agent):
-    
+
     def __init__(self, deep_sf, buffer, *args, use_gpi=True, test_epsilon=0.03, **kwargs):
         """
         Creates a new SFDQN agent per the specifications in the original paper.
@@ -29,6 +31,9 @@ class SFDQN(Agent):
         self.buffer = buffer
         self.use_gpi = use_gpi
         self.test_epsilon = test_epsilon
+
+        self.logger = get_logger_level()
+        self.device = get_torch_device()
         
     def get_Q_values(self, s, s_enc):
         q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
@@ -92,22 +97,22 @@ class SFDQN(Agent):
                         R = self.test_agent(test_task)
                         Rs.append(R)
                     print('test performance: {}'.format('\t'.join(map('{:.4f}'.format, Rs))))
-                    avg_R = np.mean(Rs)
+                    avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
                     return_data.append(avg_R)
-                    logger.log_progress(self.get_progress_dict())
-                    logger.log_average_reward(avg_R, self.total_training_steps)
-                    logger.log_accumulative_reward(np.sum(return_data), self.total_training_steps)
+                    self.logger.log_progress(self.get_progress_dict())
+                    self.logger.log_average_reward(avg_R, self.total_training_steps)
+                    self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
 
                 self.total_training_steps += 1
         return return_data
     
     def get_test_action(self, s_enc, w):
         if random.random() <= self.test_epsilon:
-            a = random.randrange(self.n_actions)
+            a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
         else:
             q, c = self.sf.GPI_w(s_enc, w)
             q = q[:, c,:]
-            a = np.argmax(q)
+            a = torch.argmax(q)
         return a
             
     def test_agent(self, task):

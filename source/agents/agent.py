@@ -2,9 +2,11 @@
 import random
 import numpy as np
 
+from utils.torch import device
+
 
 class Agent:
-    
+
     def __init__(self, gamma, T, encoding, *args, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
                  print_ev=1000, save_ev=100, **kwargs):
         """
@@ -140,13 +142,15 @@ class Agent:
     # TRAINING
     # ===========================================================================
     def _epsilon_greedy(self, q):
-        assert q.size == self.n_actions
+        import torch
+        q = q.flatten()
+        assert q.size()[0] == self.n_actions
         
         # sample from a Bernoulli distribution with parameter epsilon
         if random.random() <= self.epsilon:
-            a = random.randrange(self.n_actions)
+            a = torch.tensor(random.randrange(self.n_actions)).to(device)
         else:
-            a = np.argmax(q)
+            a = torch.argmax(q)
         
         # decrease the exploration gradually
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
