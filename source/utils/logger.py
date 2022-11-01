@@ -3,8 +3,6 @@ from torch.utils.tensorboard import SummaryWriter
 from abc import abstractmethod
 import time
 
-import numpy as np
-
 logger = None 
 
 class LoggerBase(object):
@@ -29,11 +27,11 @@ class LoggerBase(object):
         self.log_scalar(f'W_Error/Step/Task_{task_id}', progress.get('w_err'), progress.get('steps'))
 
         # History
-        history = progress.get('reward_hist')
-        history_accum = progress.get('cum_reward_hist')
-        if len(history) > 0 and len(history_accum) > 0:
-            self.log_histogram('History/Average_Reward', np.array(history))
-            self.log_histogram('History/Accum_Reward', np.array(history_accum))
+        #history = progress.get('reward_hist')
+        #history_accum = progress.get('cum_reward_hist')
+        #if len(history) > 0 and len(history_accum) > 0:
+        #    self.log_histogram('History/Average_Reward', np.array(history))
+        #    self.log_histogram('History/Accum_Reward', np.array(history_accum))
 
     def log_tasks_performance(self, performances):
         for task, performance in enumerate(performances):
