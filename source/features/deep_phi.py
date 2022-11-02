@@ -5,7 +5,7 @@ from utils.torch import get_torch_device, update_models_weights
 import torch
 
 
-class DeepSF(SF):
+class DeepSF_PHI(SF):
     """
     A successor feature representation implemented using Keras. Accepts a wide variety of neural networks as
     function approximators.
@@ -26,7 +26,7 @@ class DeepSF(SF):
         target_update_ev : integer 
             how often to update the target network, measured by the number of training calls
         """
-        super(DeepSF, self).__init__(*args, **kwargs)
+        super(DeepSF_PHI, self).__init__(*args, **kwargs)
         self.pytorch_model_handle = pytorch_model_handle
         self.target_update_ev = target_update_ev
         
@@ -45,8 +45,6 @@ class DeepSF(SF):
             self.n_features = task.feature_dim()
             self.inputs = task.encode_dim()
             
-        # build SF network and copy its weights from previous task
-        # output shape is assumed to be [n_batch, n_actions, n_features]
         model, loss, optim = self.pytorch_model_handle(self.inputs, self.n_actions * self.n_features, (self.n_actions, self.n_features), 1)
 
         if source is not None and self.n_tasks > 0:
@@ -87,13 +85,20 @@ class DeepSF(SF):
 
         return torch.stack(predictions, axis=1).to(self.device)
     
-    def update_successor(self, transitions, policy_index):
+    def update_successor(self, transitions, phis_models, policy_index):
         if transitions is None:
             return
+
+        print('POLICY INDEX BEFOPRE', policy_index)
+        torch.autograd.set_detect_anomaly(True)
         states, actions, phis, next_states, gammas = transitions
         n_batch = len(gammas)
         indices = torch.arange(n_batch)
         gammas = gammas.reshape((-1, 1))
+
+        phi_model_tuple, target_phi_tuple = phis_models[policy_index]
+        phi_model, phi_loss, phi_optim = phi_model_tuple
+        target_phi_model, *_ = target_phi_tuple 
          
         # next actions come from GPI
         q1, _ = self.GPI(next_states, policy_index)
@@ -110,12 +115,20 @@ class DeepSF(SF):
         # train the SF network
         merge_current_target_psi = current_psi.clone()
         merge_current_target_psi[indices, actions,:] = targets
-        # psi_model.train_on_batch(states, current_psi)
 
+        #current_psi_clone = current_psi.clone()
+        #merge_current_target_psi_clone = merge_current_target_psi.clone()
+        # TODO Here I can add the second Loss. the phi^T w.
+        # TODO How many times does phi vector should be updated?
         psi_optim.zero_grad()
         loss = psi_loss(current_psi, merge_current_target_psi)
-        loss.backward()
+        loss.backward(retain_graph=True)
         psi_optim.step()
+
+        #phi_optim.zero_grad()
+        #phi_loss_value = phi_loss(current_psi_clone, merge_current_target_psi_clone)
+        #phi_loss_value.backward()
+        # phi_optim.step()
 
         # Finish train the SF network
         
@@ -123,4 +136,5 @@ class DeepSF(SF):
         self.updates_since_target_updated[policy_index] += 1
         if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
             update_models_weights(psi_model, target_psi_model)
+            update_models_weights(phi_model, target_phi_model)
             self.updates_since_target_updated[policy_index] = 0

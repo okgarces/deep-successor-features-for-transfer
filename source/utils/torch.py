@@ -24,3 +24,7 @@ def get_activation(name):
         raise Exception('Activation name not supported')
     
     return activation
+
+def update_models_weights(model: torch.nn.Module, target_model: torch.nn.Module):
+    for target_param, model_param in zip(target_model.parameters(), model.parameters()):
+        target_param.data.copy_(model_param.data)
