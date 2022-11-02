@@ -63,7 +63,7 @@ def phi_model_lambda(s_enc_dim, action_dim, feature_dim) -> ModelTuple:
         torch.nn.Linear(2048, 2048),
         torch.nn.Softmax(),
         torch.nn.Linear(2048, feature_dim)
-    )
+    ).to(device)
     optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss = torch.nn.MSELoss().to(device)
 
