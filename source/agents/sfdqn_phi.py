@@ -61,7 +61,7 @@ class SFDQN_PHI(Agent):
         self.sf.update_reward(phi, r, self.task_index)
         
         # remember this experience
-        self.buffer.append(s_enc, a, phi, s1_enc, gamma)
+        self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
         
         # update SFs
         transitions = self.buffer.replay()

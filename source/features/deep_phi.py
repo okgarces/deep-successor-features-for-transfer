@@ -89,9 +89,7 @@ class DeepSF_PHI(SF):
         if transitions is None:
             return
 
-        print('POLICY INDEX BEFOPRE', policy_index)
-        torch.autograd.set_detect_anomaly(True)
-        states, actions, phis, next_states, gammas = transitions
+        states, actions, rs, phis, next_states, gammas = transitions
         n_batch = len(gammas)
         indices = torch.arange(n_batch)
         gammas = gammas.reshape((-1, 1))
@@ -118,10 +116,15 @@ class DeepSF_PHI(SF):
 
         #current_psi_clone = current_psi.clone()
         #merge_current_target_psi_clone = merge_current_target_psi.clone()
-        # TODO Here I can add the second Loss. the phi^T w.
+        # Concat axis = 1 to concat per each batch
+        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1)
+        phi_loss_value = phi_loss(rs, phi_model(input_phi) @ self.fit_w[policy_index])
+
         # TODO How many times does phi vector should be updated?
         psi_optim.zero_grad()
-        loss = psi_loss(current_psi, merge_current_target_psi)
+        psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
+
+        loss = phi_loss_value + psi_loss_value
         loss.backward(retain_graph=True)
         psi_optim.step()
 

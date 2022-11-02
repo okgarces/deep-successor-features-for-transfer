@@ -5,7 +5,7 @@ import numpy as np
 from agents.sfdqn_phi import SFDQN_PHI
 from features.deep_phi import DeepSF_PHI
 from tasks.reacher_phi import Reacher_PHI
-from agents.buffer import ReplayBuffer
+from agents.buffer_phi import ReplayBuffer_PHI
 from utils.config import parse_config_file
 from utils.torch import set_torch_device, get_activation
 from utils.logger import set_logger_level
@@ -117,7 +117,7 @@ def train():
     print('building SFDQN with phi Learning')
     deep_sf = DeepSF_PHI(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
     # sf_model_lambda could be another kind of lambda
-    sfdqn = SFDQN_PHI(deep_sf=deep_sf, lambda_phi_model=phi_model_lambda, buffer=ReplayBuffer(sfdqn_params['buffer_params']),
+    sfdqn = SFDQN_PHI(deep_sf=deep_sf, lambda_phi_model=phi_model_lambda, buffer=ReplayBuffer_PHI(sfdqn_params['buffer_params']),
                   **sfdqn_params, **agent_params)
 
     # train SFDQN
