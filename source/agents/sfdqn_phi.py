@@ -56,7 +56,7 @@ class SFDQN_PHI(Agent):
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
+        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
         phi = phi_model(input_phi)
         self.sf.update_reward(phi, r, self.task_index)
         
