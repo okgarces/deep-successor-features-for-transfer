@@ -64,9 +64,10 @@ class SFDQN_PHI(Agent):
         self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
         
         # update SFs
-        transitions = self.buffer.replay()
-        for index in range(self.n_tasks):
-            self.sf.update_successor(transitions, self.phis, index)
+        if self.total_training_steps % 100 == 0:
+            transitions = self.buffer.replay()
+            for index in range(self.n_tasks):
+                self.sf.update_successor(transitions, self.phis, index)
         
     def reset(self):
         super(SFDQN_PHI, self).reset()
