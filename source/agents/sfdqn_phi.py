@@ -163,7 +163,7 @@ class SFDQN_PHI(Agent):
     def test_agent(self, task):
         R = 0.0
         # w = task.get_w()
-        w = torch.nn.Linear(task.feature_dim(), 1) 
+        w = torch.nn.Linear(task.feature_dim(), 1).to(self.device)
         s = task.initialize()
         s_enc = self.encoding(s)
         for _ in range(self.T):
