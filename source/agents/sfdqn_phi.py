@@ -128,7 +128,7 @@ class SFDQN_PHI(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            self.test_tasks_weights.append(torch.nn.Linear(test_task.feature_dim(), 1))
+            self.test_tasks_weights.append(torch.nn.Linear(test_task.feature_dim(), 1).to(self.device))
             
         # train each one
         return_data = []
