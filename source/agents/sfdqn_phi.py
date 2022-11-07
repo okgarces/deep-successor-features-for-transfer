@@ -51,20 +51,20 @@ class SFDQN_PHI(Agent):
         return q[:, c,:]
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
-        
         # update w
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
-        phi = phi_model(input_phi)
-        self.sf.update_reward(phi, r, self.task_index)
+        #self.sf.update_reward(phi, r, self.task_index)
         
         # remember this experience
-        self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
+        with torch.no_grad():
+            input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+            phi = phi_model(input_phi)
+            self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
         
         # update SFs
-        if self.total_training_steps % 100 == 0:
+        if self.total_training_steps % 10 == 0:
             transitions = self.buffer.replay()
             for index in range(self.n_tasks):
                 self.sf.update_successor(transitions, self.phis, index)
@@ -162,7 +162,8 @@ class SFDQN_PHI(Agent):
             
     def test_agent(self, task):
         R = 0.0
-        w = task.get_w()
+        # w = task.get_w()
+        w = torch.nn.Linear(task.feature_dim(), 1) 
         s = task.initialize()
         s_enc = self.encoding(s)
         for _ in range(self.T):
@@ -175,3 +176,25 @@ class SFDQN_PHI(Agent):
                 break
         return R
     
+    def get_progress_dict(self):
+        if self.sf is not None:
+            gpi_percent = self.sf.GPI_usage_percent(self.task_index)
+            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight - self.sf.true_w[self.task_index])
+        else:
+            gpi_percent = None
+            w_error = None
+
+        return_dict = {
+            'task': self.task_index,
+            'steps': self.total_training_steps,
+            'episodes': self.episode,
+            'eps': self.epsilon,
+            'ep_reward': self.episode_reward,
+            'reward': self.reward,
+            'reward_hist': self.reward_hist,
+            'cum_reward': self.cum_reward,
+            'cum_reward_hist': self.cum_reward_hist,
+            'GPI%': gpi_percent,
+            'w_err': w_error
+            }
+        return return_dict

@@ -36,8 +36,6 @@ phi_params = config_params['PHI']
 device = set_torch_device(use_gpu=use_gpu)
 logger = set_logger_level(use_logger=use_logger)
 
-phi_model = None
-
 # tasks
 def generate_tasks(include_target):
     feature_dim = phi_params['n_features']
@@ -47,7 +45,6 @@ def generate_tasks(include_target):
 
 
 def phi_model_lambda(s_enc_dim, action_dim, feature_dim) -> ModelTuple:
-    global phi_model
     model_params = phi_params['model_params']
     learning_rate = model_params['learning_rate']
 
@@ -57,17 +54,15 @@ def phi_model_lambda(s_enc_dim, action_dim, feature_dim) -> ModelTuple:
         torch.nn.Linear(np.sum([s_enc_dim, action_dim, s_enc_dim]), 2048),
         torch.nn.ReLU(),
         torch.nn.Linear(2048, 2048),
-        torch.nn.Softmax(),
+        torch.nn.ReLU(),
         torch.nn.Linear(2048, 2048),
-        torch.nn.Softmax(),
+        torch.nn.ReLU(),
         torch.nn.Linear(2048, 2048),
-        torch.nn.Softmax(),
+        torch.nn.ReLU(),
         torch.nn.Linear(2048, feature_dim)
     ).to(device)
     optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss = torch.nn.MSELoss().to(device)
-
-    phi_model = model
 
     return model, loss, optim
 
@@ -103,10 +98,7 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
 
     model = torch.nn.Sequential(layers).to(device)
 
-    if phi_model is None:
-        raise Exception('Initialize phi model')
-
-    optim = torch.optim.Adam(list(model.parameters()) + list(phi_model.parameters()), lr=learning_rate)
+    optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss = torch.nn.MSELoss().to(device)
 
     return model, loss, optim
