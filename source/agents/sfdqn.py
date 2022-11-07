@@ -34,6 +34,7 @@ class SFDQN(Agent):
 
         self.logger = get_logger_level()
         self.device = get_torch_device()
+        self.test_tasks_weights = []
         
     def get_Q_values(self, s, s_enc):
         q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
@@ -81,6 +82,9 @@ class SFDQN(Agent):
         self.reset()
         for train_task in train_tasks:
             self.add_training_task(train_task)
+
+        for test_task in test_tasks:
+            self.test_tasks_weights.append(torch.nn.Linear(12,1).to(self.device))
             
         # train each one
         return_data = []
@@ -94,8 +98,8 @@ class SFDQN(Agent):
                 # test
                 if t % n_test_ev == 0:
                     Rs = []
-                    for test_task in test_tasks:
-                        R = self.test_agent(test_task)
+                    for test_index, test_task in enumerate(test_tasks):
+                        R = self.test_agent(test_task, test_index)
                         Rs.append(R)
                     print('test performance: {}'.format('\t'.join(map('{:.4f}'.format, Rs))))
                     avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
@@ -111,14 +115,17 @@ class SFDQN(Agent):
         if random.random() <= self.test_epsilon:
             a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
         else:
-            q, c = self.sf.GPI_w(s_enc, w)
+            psi = self.sf.get_successors(s_enc)
+            q = w(psi)
+            c = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+
             q = q[:, c,:]
             a = torch.argmax(q)
         return a
             
-    def test_agent(self, task):
+    def test_agent(self, task, test_index):
         R = 0.0
-        w = task.get_w()
+        w = self.test_tasks_weights[test_index]
         s = task.initialize()
         s_enc = self.encoding(s)
         for _ in range(self.T):
@@ -127,7 +134,20 @@ class SFDQN(Agent):
             s1_enc = self.encoding(s1)
             s, s_enc = s1, s1_enc
             R += r
+
+            self.update_test_reward_mapper(w, r, s, a, s1)
             if done:
                 break
         return R
-    
+
+    def update_test_reward_mapper(self, w_approx, r, s, a, s1):
+        phi = self.phi(s, a, s1)
+
+        optim = torch.optim.Adam(w_approx.parameters(), lr=0.001)
+        loss_task = torch.nn.MSELoss()
+
+        optim.zero_grad()
+        loss = loss_task(r.float(), w_approx(phi))
+        loss.backward()
+        optim.step()
+

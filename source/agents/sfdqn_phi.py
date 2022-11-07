@@ -42,6 +42,7 @@ class SFDQN_PHI(Agent):
         self.lambda_phi_model = lambda_phi_model
         self.phi: Tuple[ModelTuple, ModelTuple]
         self.updates_since_phi_target_updated = []
+        self.test_tasks_weights = []
         
     def get_Q_values(self, s, s_enc):
         q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
@@ -125,6 +126,9 @@ class SFDQN_PHI(Agent):
         self.reset()
         for train_task in train_tasks:
             self.add_training_task(train_task)
+
+        for test_task in test_tasks:
+            self.test_tasks_weights.append(torch.nn.Linear(test_task.feature_dim(), 1))
             
         # train each one
         return_data = []
@@ -138,8 +142,8 @@ class SFDQN_PHI(Agent):
                 # test
                 if t % n_test_ev == 0:
                     Rs = []
-                    for test_task in test_tasks:
-                        R = self.test_agent(test_task)
+                    for test_index, test_task in enumerate(test_tasks):
+                        R = self.test_agent(test_task, test_index)
                         Rs.append(R)
                     print('test performance: {}'.format('\t'.join(map('{:.4f}'.format, Rs))))
                     avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
@@ -160,10 +164,11 @@ class SFDQN_PHI(Agent):
             a = torch.argmax(q)
         return a
             
-    def test_agent(self, task):
+    def test_agent(self, task, test_index):
         R = 0.0
         # w = task.get_w()
-        w = torch.nn.Linear(task.feature_dim(), 1).to(self.device)
+        w = self.test_tasks_weights[test_index]
+
         s = task.initialize()
         s_enc = self.encoding(s)
         for _ in range(self.T):
@@ -172,9 +177,27 @@ class SFDQN_PHI(Agent):
             s1_enc = self.encoding(s1)
             s, s_enc = s1, s1_enc
             R += r
+
+            self.update_test_reward_mapper(w, r, s, a, s1)
             if done:
                 break
         return R
+
+    def update_test_reward_mapper(self, w_approx, r, s_enc, a, s1_enc):
+
+        phi_tuple, *_ = self.phi
+        phi_model, *_ = phi_tuple
+
+        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+        phi = phi_model(input_phi)
+
+        optim = torch.optim.Adam(w_approx.parameters(), lr=0.001)
+        loss_task = torch.nn.MSELoss()
+
+        optim.zero_grad()
+        loss = loss_task(r.float(), w_approx(phi))
+        loss.backward()
+        optim.step()
     
     def get_progress_dict(self):
         if self.sf is not None:
