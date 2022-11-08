@@ -84,7 +84,7 @@ class SFDQN(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            self.test_tasks_weights.append(torch.nn.Linear(12,1).to(self.device))
+            self.test_tasks_weights.append(torch.nn.Linear(12,1, bias=False).to(self.device))
             
         # train each one
         return_data = []
@@ -143,7 +143,7 @@ class SFDQN(Agent):
     def update_test_reward_mapper(self, w_approx, r, s, a, s1):
         phi = self.phi(s, a, s1)
 
-        optim = torch.optim.Adam(w_approx.parameters(), lr=0.001)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=0.001)
         loss_task = torch.nn.MSELoss()
 
         optim.zero_grad()

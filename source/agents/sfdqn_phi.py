@@ -128,7 +128,7 @@ class SFDQN_PHI(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            self.test_tasks_weights.append(torch.nn.Linear(test_task.feature_dim(), 1).to(self.device))
+            self.test_tasks_weights.append(torch.nn.Linear(test_task.feature_dim(), 1, bias=False).to(self.device))
             
         # train each one
         return_data = []
@@ -191,7 +191,7 @@ class SFDQN_PHI(Agent):
         input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
         phi = phi_model(input_phi)
 
-        optim = torch.optim.Adam(w_approx.parameters(), lr=0.001)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=0.001)
         loss_task = torch.nn.MSELoss()
 
         optim.zero_grad()
