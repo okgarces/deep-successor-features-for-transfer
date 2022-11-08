@@ -205,7 +205,7 @@ class DeepSF_PHI(SF):
         # build new reward function
         # TODO Remove task feature_dim should be called from the agent or config
         n_features = task.feature_dim()
-        fit_w = torch.nn.Linear(n_features, 1).to(self.device)
+        fit_w = torch.nn.Linear(n_features, 1, bias=False).to(self.device)
         
         self.fit_w.append(fit_w)
         self.true_w.append(true_w)
