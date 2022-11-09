@@ -33,6 +33,11 @@ class LoggerBase(object):
         #    self.log_histogram('History/Average_Reward', np.array(history))
         #    self.log_histogram('History/Accum_Reward', np.array(history_accum))
 
+    def log_target_error_progress(self, progress):
+        task_id = progress.get('task') + 1
+        self.log_scalar(f'Target_Tasks/W_Error/Ev_Steps/task_{task_id}', progress.get('w_error'), progress.get('steps'))
+        self.log_scalar(f'Target_Tasks/Rewards/Ev_Steps/task_{task_id}', progress.get('reward'), progress.get('steps'))
+
     def log_tasks_performance(self, performances):
         for task, performance in enumerate(performances):
             self.log_scalar('Overall_Performance/Task', performance, task + 1)

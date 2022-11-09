@@ -126,28 +126,51 @@ class SFDQN(Agent):
     def test_agent(self, task, test_index):
         R = 0.0
         w = self.test_tasks_weights[test_index]
+        print(f'W leng {len(self.test_tasks_weights)}')
+        print(f'W {w.weight}')
         s = task.initialize()
         s_enc = self.encoding(s)
-        for _ in range(self.T):
+
+        accum_loss_per_t = 0
+        for t_test in range(self.T):
             a = self.get_test_action(s_enc, w)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
             s, s_enc = s1, s1_enc
             R += r
 
-            self.update_test_reward_mapper(w, r, s, a, s1)
+            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            accum_loss_per_t += loss_t
+
+            if t_test % 250 == 0:
+                self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
+
             if done:
                 break
+
         return R
 
     def update_test_reward_mapper(self, w_approx, r, s, a, s1):
+        # Return Loss
         phi = self.phi(s, a, s1)
 
-        optim = torch.optim.SGD(w_approx.parameters(), lr=0.001)
+        # Learning rate alpha (Weights)
+        optim = torch.optim.Adam(w_approx.parameters(), lr=0.5)
         loss_task = torch.nn.MSELoss()
 
         optim.zero_grad()
-        loss = loss_task(r.float(), w_approx(phi))
+        loss = -loss_task(r.float(), w_approx(phi))
         loss.backward()
         optim.step()
+        
+        return loss
 
+    def get_target_reward_mapper_error(self, r, loss, task, ts):
+        return_dict = {
+            'task': task,
+            # Total steps and ev_frequency
+            'reward': r,
+            'steps': ((500 * (self.total_training_steps // 1000)) + ts),
+            'w_error': loss
+            }
+        return return_dict
