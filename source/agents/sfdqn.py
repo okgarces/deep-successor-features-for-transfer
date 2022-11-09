@@ -101,7 +101,6 @@ class SFDQN(Agent):
                     for test_index, test_task in enumerate(test_tasks):
                         R = self.test_agent(test_task, test_index)
                         Rs.append(R)
-                    print('test performance: {}'.format('\t'.join(map('{:.4f}'.format, Rs))))
                     avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
                     return_data.append(avg_R)
                     self.logger.log_progress(self.get_progress_dict())
@@ -126,8 +125,6 @@ class SFDQN(Agent):
     def test_agent(self, task, test_index):
         R = 0.0
         w = self.test_tasks_weights[test_index]
-        print(f'W leng {len(self.test_tasks_weights)}')
-        print(f'W {w.weight}')
         s = task.initialize()
         s_enc = self.encoding(s)
 
