@@ -84,7 +84,13 @@ class SFDQN(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            self.test_tasks_weights.append(torch.nn.Linear(12,1, bias=False).to(self.device))
+            fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
+            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False).to(self.device)
+
+            with torch.no_grad():
+                w_approx.weight = torch.nn.Parameter(fit_w)
+
+            self.test_tasks_weights.append(w_approx)
             
         # train each one
         return_data = []
@@ -136,7 +142,7 @@ class SFDQN(Agent):
             R += r
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1).item()
+            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
 
             if t_test % 250 == 0:
                 self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
