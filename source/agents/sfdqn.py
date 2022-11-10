@@ -128,7 +128,6 @@ class SFDQN(Agent):
         s = task.initialize()
         s_enc = self.encoding(s)
 
-        accum_loss_per_t = 0
         for t_test in range(self.T):
             a = self.get_test_action(s_enc, w)
             s1, r, done = task.transition(a)
@@ -137,7 +136,6 @@ class SFDQN(Agent):
             R += r
 
             loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            accum_loss_per_t += loss_t
 
             if t_test % 250 == 0:
                 self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
@@ -152,7 +150,7 @@ class SFDQN(Agent):
         phi = self.phi(s, a, s1)
 
         # Learning rate alpha (Weights)
-        optim = torch.optim.Adam(w_approx.parameters(), lr=0.5)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=0.5)
         loss_task = torch.nn.MSELoss()
 
         optim.zero_grad()
