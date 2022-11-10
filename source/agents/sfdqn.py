@@ -135,7 +135,8 @@ class SFDQN(Agent):
             s, s_enc = s1, s1_enc
             R += r
 
-            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1).item()
 
             if t_test % 250 == 0:
                 self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
@@ -161,6 +162,27 @@ class SFDQN(Agent):
         if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
             optim.step()
         # If inf loss
+        return loss
+
+    def update_test_reward_mapper_ascent_version(self, w_approx, r, s, a, s1):
+        # Return Loss
+        phi = self.phi(s, a, s1)
+
+        # Learning rate alpha (Weights)
+        loss_task = torch.nn.MSELoss()
+
+        loss = loss_task(r.float(), w_approx(phi))
+
+        w_control = w_approx.weight
+
+        # Compute new w
+        r_fit = torch.sum(phi * w_control)
+        w_control = w_control + self.sf.alpha_w * (r - r_fit) * phi
+
+        # Update weights
+        with torch.no_grad():
+            w_approx.weight = torch.nn.Parameter(w_control)
+
         return loss
 
     def get_target_reward_mapper_error(self, r, loss, task, ts):
