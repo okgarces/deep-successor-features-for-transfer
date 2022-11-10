@@ -84,8 +84,8 @@ class SFDQN(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
-            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False).to(self.device)
+            fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
+            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
 
             with torch.no_grad():
                 w_approx.weight = torch.nn.Parameter(fit_w)
