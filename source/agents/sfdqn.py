@@ -160,8 +160,10 @@ class SFDQN(Agent):
         optim = torch.optim.SGD(w_approx.parameters(), lr=0.05)
         loss_task = torch.nn.MSELoss()
 
+        r_tensor = torch.tensor(r).detach().float().unsqueeze(0).requires_grad_(False).to(self.device)
+
         optim.zero_grad()
-        loss = loss_task(r.float(), w_approx(phi))
+        loss = loss_task(w_approx(phi), r_tensor)
         loss.backward()
         
         # Otherwise gradients will be computed to inf or nan.
@@ -177,8 +179,7 @@ class SFDQN(Agent):
         # Learning rate alpha (Weights)
         loss_task = torch.nn.MSELoss()
 
-        loss = loss_task(r.float(), w_approx(phi))
-
+        loss = loss_task(w_approx(phi), torch.tensor(r).float().unsqueeze(0))
         w_control = w_approx.weight
 
         # Compute new w
@@ -190,6 +191,7 @@ class SFDQN(Agent):
             w_approx.weight = torch.nn.Parameter(w_control)
 
         return loss
+
 
     def get_target_reward_mapper_error(self, r, loss, task, ts):
         return_dict = {
