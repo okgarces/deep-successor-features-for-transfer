@@ -156,7 +156,7 @@ class SFDQN(Agent):
         loss_task = torch.nn.MSELoss()
 
         optim.zero_grad()
-        loss = -loss_task(r.float(), w_approx(phi))
+        loss = loss_task(r.float(), w_approx(phi))
         loss.backward()
         optim.step()
         
