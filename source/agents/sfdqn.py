@@ -156,8 +156,11 @@ class SFDQN(Agent):
         optim.zero_grad()
         loss = loss_task(r.float(), w_approx(phi))
         loss.backward()
-        optim.step()
         
+        # Otherwise gradients will be computed to inf or nan.
+        if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
+            optim.step()
+        # If inf loss
         return loss
 
     def get_target_reward_mapper_error(self, r, loss, task, ts):
