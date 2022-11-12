@@ -86,9 +86,13 @@ class SFDQN(Agent):
         for test_task in test_tasks:
             fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
             w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
+            # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
 
             with torch.no_grad():
                 w_approx.weight = torch.nn.Parameter(fit_w)
+
+            #fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
+            #w_approx = fit_w
 
             self.test_tasks_weights.append(w_approx)
             
@@ -121,7 +125,8 @@ class SFDQN(Agent):
             a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
         else:
             psi = self.sf.get_successors(s_enc)
-            q = w(psi)
+            q = w(psi)[:,:,:,0]
+            # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
             c = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
 
             q = q[:, c,:]
@@ -134,35 +139,61 @@ class SFDQN(Agent):
         s = task.initialize()
         s_enc = self.encoding(s)
 
-        for t_test in range(self.T):
+        accum_loss = 0
+        for _ in range(self.T):
             a = self.get_test_action(s_enc, w)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
-            s, s_enc = s1, s1_enc
-            R += r
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            loss_t = self.update_test_reward_mapper_true_w(w, task).item()
+            accum_loss += loss_t
+            # loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1, test_index)
 
-            if t_test % 250 == 0:
-                self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
+            # Update states
+            s, s_enc = s1, s1_enc
+            R += r
 
             if done:
                 break
 
+        # Log accum loss for T
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, test_index, self.T))
+
         return R
+
+    def update_test_reward_mapper_true_w(self, w_approx, task):
+
+        true_w = task.get_w()
+        # Learning rate alpha (Weights)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=0.05)
+        loss_task = torch.nn.MSELoss()
+
+        optim.zero_grad()
+
+        loss = loss_task(true_w, w_approx.weight)
+        loss.backward()
+        
+        # Otherwise gradients will be computed to inf or nan.
+        if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
+            optim.step()
+        # If inf loss
+        return loss
+
 
     def update_test_reward_mapper(self, w_approx, r, s, a, s1):
         # Return Loss
         phi = self.phi(s, a, s1)
+        phi = phi.clone().detach().requires_grad_(False)
 
         # Learning rate alpha (Weights)
-        optim = torch.optim.SGD(w_approx.parameters(), lr=0.05)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=0.005, weight_decay=0.01)
         loss_task = torch.nn.MSELoss()
 
         r_tensor = torch.tensor(r).detach().float().unsqueeze(0).requires_grad_(False).to(self.device)
 
         optim.zero_grad()
+
         loss = loss_task(w_approx(phi), r_tensor)
         loss.backward()
         
@@ -172,33 +203,35 @@ class SFDQN(Agent):
         # If inf loss
         return loss
 
-    def update_test_reward_mapper_ascent_version(self, w_approx, r, s, a, s1):
+    def update_test_reward_mapper_ascent_version(self, w_approx, r, s, a, s1, task_index):
         # Return Loss
         phi = self.phi(s, a, s1)
 
         # Learning rate alpha (Weights)
-        loss_task = torch.nn.MSELoss()
+        #loss_task = torch.nn.MSELoss()
 
-        loss = loss_task(w_approx(phi), torch.tensor(r).float().unsqueeze(0))
-        w_control = w_approx.weight
+        #loss = loss_task(w_approx(phi), torch.tensor(r).float().unsqueeze(0))
+        #w_control = w_approx.weight
+        w_control = w_approx
 
         # Compute new w
         r_fit = torch.sum(phi * w_control)
         w_control = w_control + self.sf.alpha_w * (r - r_fit) * phi
 
         # Update weights
-        with torch.no_grad():
-            w_approx.weight = torch.nn.Parameter(w_control)
+        #with torch.no_grad():
+        #    w_approx.weight = torch.nn.Parameter(w_control)
+        self.test_tasks_weights[task_index] = w_control
 
-        return loss
+        #return loss
 
-
-    def get_target_reward_mapper_error(self, r, loss, task, ts):
+    def get_target_reward_mapper_error(self, r, loss, task_index, ts):
         return_dict = {
-            'task': task,
+            'task': task_index,
             # Total steps and ev_frequency
             'reward': r,
             'steps': ((500 * (self.total_training_steps // 1000)) + ts),
-            'w_error': loss
+            'w_error': loss,
+            #'w_error': torch.linalg.norm(self.test_tasks_weights[task_index] - task.get_w())
             }
         return return_dict
