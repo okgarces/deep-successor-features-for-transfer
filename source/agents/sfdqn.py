@@ -146,7 +146,7 @@ class SFDQN(Agent):
             s1_enc = self.encoding(s1)
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper_true_w(w, task).item()
+            loss_t = self.update_test_reward_mapper(w, task, r, s, a, s1).item()
             accum_loss += loss_t
             # loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1, test_index)
 
@@ -181,9 +181,9 @@ class SFDQN(Agent):
         return loss
 
 
-    def update_test_reward_mapper(self, w_approx, r, s, a, s1):
+    def update_test_reward_mapper(self, w_approx, task, r, s, a, s1):
         # Return Loss
-        phi = self.phi(s, a, s1)
+        phi = task.features(s,a,s1)
         phi = phi.clone().detach().requires_grad_(False)
 
         # Learning rate alpha (Weights)
