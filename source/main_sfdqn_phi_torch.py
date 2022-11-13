@@ -21,6 +21,7 @@ gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
 use_gpu= gen_params.get('use_gpu', False) # Default GPU False
 use_logger= gen_params.get('use_logger', False) # Default GPU False
+n_cycles_per_task = gen_params.get('cycles_per_task', False) # Default GPU False
 
 task_params = config_params['TASK']
 goals = task_params['train_targets']
@@ -116,7 +117,7 @@ def train():
     print('training SFDQN')
     train_tasks, test_tasks = generate_tasks(False)
     # sfdqn_perf = sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'])
-    sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'])
+    sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
 
     # build DQN
     #print('building DQN')
