@@ -168,9 +168,10 @@ class DeepSF_PHI(SF):
         phi_loss_value = phi_loss(task_w(phis), rs)
 
         # TODO How many times does phi vector should be updated?
+        # Only one phi vector with a weight_decay to learn smooth functions
         # psi_optim.zero_grad()
         optim = torch.optim.Adam(list(phi_model.parameters())
-                + list(psi_model.parameters()), lr=0.001)
+                + list(psi_model.parameters()), lr=0.001, weight_decay=0.01)
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
