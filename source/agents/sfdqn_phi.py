@@ -43,6 +43,25 @@ class SFDQN_PHI(Agent):
         self.phi: Tuple[ModelTuple, ModelTuple]
         self.updates_since_phi_target_updated = []
         self.test_tasks_weights = []
+
+    def set_active_training_task(self, index):
+        """
+        Sets the task at the requested index as the current task the agent will train on.
+        The index is based on the order in which the training task was added to the agent.
+        """
+        
+        # set the task
+        self.task_index = index
+        self.active_task = self.tasks[index]
+        
+        # reset task-dependent counters
+        self.s = self.s_enc = None
+        self.new_episode = True
+        self.episode, self.episode_reward = 0, 0.
+        self.steps_since_last_episode, self.reward_since_last_episode = 0, 0.
+        self.steps, self.reward = 0, 0.
+        self.epsilon = self.epsilon_init
+        self.episode_reward_hist = []
         
     def get_Q_values(self, s, s_enc):
         q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
@@ -59,16 +78,20 @@ class SFDQN_PHI(Agent):
         #self.sf.update_reward(phi, r, self.task_index)
         
         # remember this experience
-        with torch.no_grad():
-            input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
-            phi = phi_model(input_phi)
-            self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
+        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+
+        # Update Reward Mapper
+        phi = phi_model(input_phi)
+        phi = phi.clone().detach().requires_grad_(False)
+        self.sf.update_reward(phi, r, self.task_index)
+        # phis should not be in buffer
+        self.buffer.append(s_enc, a, r, torch.tensor([]), s1_enc, gamma)
         
         # update SFs
-        if self.total_training_steps % 10 == 0:
+        if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
             for index in range(self.n_tasks):
-                self.sf.update_successor(transitions, self.phis, index)
+                self.sf.update_successor(transitions, self.phi, index)
         
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -83,27 +106,26 @@ class SFDQN_PHI(Agent):
         self.tasks.append(task)   
         self.n_tasks = len(self.tasks)  
         if self.n_tasks == 1:
+            # Only one phi approximator
+
             self.n_actions = task.action_count()
-            # TODO Is this n_features is needed?
-            self.n_features = -1
+            self.n_features = task.feature_dim()
             self.s_enc_dim = task.encode_dim()
             self.action_dim = task.action_dim()
             if self.encoding == 'task':
                 self.encoding = task.encode
 
-        self.phis.append(self.init_phi_model())
+            # After initial values 
+            self.phi = self.init_phi_model()
         self.sf.add_training_task(task, source=None)
 
     ############# phi Model Learning ####################
     def init_phi_model(self):
-        # This is only if there is only one shared phi
-        if self.n_tasks > 1:
-            return self.phis[0]
-
         phi_model, phi_loss, phi_optim = self.lambda_phi_model(self.s_enc_dim, self.action_dim, self.n_features)
         phi_target_model, phi_target_loss, phi_target_optim = self.lambda_phi_model(self.s_enc_dim, self.action_dim, self.n_features)
 
         update_models_weights(phi_model, phi_target_model)
+        # TODO This variable could be removed
         self.updates_since_phi_target_updated.append(0)
 
         return (phi_model, phi_loss, phi_optim), (phi_target_model, phi_target_loss, phi_target_optim)
@@ -118,7 +140,7 @@ class SFDQN_PHI(Agent):
         return sample_str, reward_str, gpi_str
             
     ############### Train, Test methods ############
-    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000):
+    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1):
         if viewers is None: 
             viewers = [None] * len(train_tasks)
             
@@ -128,31 +150,42 @@ class SFDQN_PHI(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            self.test_tasks_weights.append(torch.nn.Linear(test_task.feature_dim(), 1).to(self.device))
+            fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
+            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
+            # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
+
+            with torch.no_grad():
+                w_approx.weight = torch.nn.Parameter(fit_w)
+
+            #fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
+            #w_approx = fit_w
+
+            self.test_tasks_weights.append(w_approx)
             
         # train each one
         return_data = []
-        for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
-            self.set_active_training_task(index)
-            for t in range(n_samples):
-                
-                # train
-                self.next_sample(viewer, n_view_ev)
-                
-                # test
-                if t % n_test_ev == 0:
-                    Rs = []
-                    for test_index, test_task in enumerate(test_tasks):
-                        R = self.test_agent(test_task, test_index)
-                        Rs.append(R)
-                    print('test performance: {}'.format('\t'.join(map('{:.4f}'.format, Rs))))
-                    avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
-                    return_data.append(avg_R)
-                    self.logger.log_progress(self.get_progress_dict())
-                    self.logger.log_average_reward(avg_R, self.total_training_steps)
-                    self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
+        # Cycles per task
+        for _ in range(cycles_per_task):
+            for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
+                self.set_active_training_task(index)
+                for t in range(n_samples):
+                    
+                    # train
+                    self.next_sample(viewer, n_view_ev)
+                    
+                    # test
+                    if t % n_test_ev == 0:
+                        Rs = []
+                        for test_index, test_task in enumerate(test_tasks):
+                            R = self.test_agent(test_task, test_index)
+                            Rs.append(R)
+                        avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
+                        return_data.append(avg_R)
+                        self.logger.log_progress(self.get_progress_dict())
+                        self.logger.log_average_reward(avg_R, self.total_training_steps)
+                        self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
 
-                self.total_training_steps += 1
+                    self.total_training_steps += 1
         return return_data
     
     def get_test_action(self, s_enc, w):
@@ -171,14 +204,18 @@ class SFDQN_PHI(Agent):
 
         s = task.initialize()
         s_enc = self.encoding(s)
-        for _ in range(self.T):
+        for t_test in range(self.T):
             a = self.get_test_action(s_enc, w)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
             s, s_enc = s1, s1_enc
             R += r
 
-            self.update_test_reward_mapper(w, r, s, a, s1)
+            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+
+            if t_test % 250 == 0:
+                self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
+
             if done:
                 break
         return R
@@ -189,15 +226,23 @@ class SFDQN_PHI(Agent):
         phi_model, *_ = phi_tuple
 
         input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
-        phi = phi_model(input_phi)
+        phi = phi_model(input_phi).clone().detach().requires_grad_(False)
 
-        optim = torch.optim.Adam(w_approx.parameters(), lr=0.001)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=0.005, weight_decay=0.01)
         loss_task = torch.nn.MSELoss()
 
+        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
+
         optim.zero_grad()
-        loss = loss_task(r.float(), w_approx(phi))
-        loss.backward()
-        optim.step()
+        loss = loss_task(w_approx(phi), r_tensor)
+
+        # Otherwise gradients will be computed to inf or nan.
+        if not (torch.isnan(loss)  or torch.isinf(loss)):
+            loss.backward()
+            if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
+                optim.step()
+        # If inf loss
+        return loss
     
     def get_progress_dict(self):
         if self.sf is not None:
@@ -219,5 +264,15 @@ class SFDQN_PHI(Agent):
             'cum_reward_hist': self.cum_reward_hist,
             'GPI%': gpi_percent,
             'w_err': w_error
+            }
+        return return_dict
+
+    def get_target_reward_mapper_error(self, r, loss, task, ts):
+        return_dict = {
+            'task': task,
+            # Total steps and ev_frequency
+            'reward': r,
+            'steps': ((500 * (self.total_training_steps // 1000)) + ts),
+            'w_error': loss
             }
         return return_dict

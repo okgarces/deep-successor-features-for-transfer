@@ -33,7 +33,7 @@ class Reacher(Task):
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = torch.tensor(self.env.reset()).to(self.device)
+        state = torch.tensor(self.env.reset()).detach().requires_grad_(False).to(self.device)
         if self.include_target_in_state:
             return torch.concat([state.flatten(), self.target_pos]).to(self.device)
         else:
@@ -47,8 +47,8 @@ class Reacher(Task):
         real_action = self.action_dict[action_int]
         new_state, reward, done, _ = self.env.step(real_action)
 
-        new_state = torch.tensor(new_state).to(self.device)
-        reward = torch.tensor(reward).to(self.device)
+        new_state = torch.tensor(new_state).detach().requires_grad_(False).to(self.device)
+        reward = torch.tensor(reward).detach().requires_grad_(False).to(self.device)
         
         if self.include_target_in_state:
             return_state = torch.concat([new_state, self.target_pos])
@@ -61,7 +61,7 @@ class Reacher(Task):
     # STATE ENCODING FOR DEEP LEARNING
     # ===========================================================================
     def encode(self, state):
-        return torch.tensor(state).reshape((1, -1)).to(self.device)
+        return torch.tensor(state).detach().requires_grad_(False).reshape((1, -1)).to(self.device)
     
     def encode_dim(self):
         if self.include_target_in_state:
@@ -75,7 +75,7 @@ class Reacher(Task):
     def features(self, state, action, next_state):
         phi = torch.zeros((len(self.target_positions),)).to(self.device)
         for index, target in enumerate(self.target_positions):
-            delta = torch.linalg.norm(torch.tensor(self.env.robot.fingertip.pose().xyz()[:2]).to(self.device) - torch.tensor(target).to(self.device))
+            delta = torch.linalg.norm(torch.tensor(self.env.robot.fingertip.pose().xyz()[:2]).detach().requires_grad_(False).to(self.device) - torch.tensor(target).detach().requires_grad_(False).to(self.device))
             phi[index] = 1. - 4. * delta
         return phi
     

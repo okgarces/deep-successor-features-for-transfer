@@ -86,18 +86,63 @@ class DeepSF_PHI(SF):
 
         return torch.stack(predictions, axis=1).to(self.device)
     
-    def update_successor(self, transitions, phis_models, policy_index):
+    def update_reward(self, phi: torch.Tensor, r: torch.Tensor, task_index: int, exact=False) -> None:
+        """
+        Updates the reward parameters for the given task based on the observed reward sample
+        from the environment. 
+        
+        Parameters
+        ----------
+        phi : torch.Tensor 
+            the state features
+        r : torch.TensorFloat | torch.Tensor
+            the observed reward from the MDP
+        task_index : integer
+            the index of the task from which this reward was sampled
+        exact : boolean
+            if True, validates the true reward from the environment and the linear representation
+        """
+        
+        # update reward using linear regression
+        w = self.fit_w[task_index]
+        phi = phi.clone().detach().requires_grad_(False)
+        loss = torch.nn.MSELoss()
+        optim = torch.optim.SGD(w.parameters(), lr=0.005, weight_decay=0.01)
+        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
+
+        # TODO This could be removed?
+        for param in w.parameters():
+            param.requires_grad = True
+
+        optim.zero_grad()
+        l1 = loss(w(phi), r_tensor)
+        
+        # Otherwise gradients will be computed to inf or nan.
+        if not (torch.isnan(l1) or torch.isinf(l1)):
+            l1.backward()
+            if not (torch.isnan(w.weight.grad).any() or torch.isinf(w.weight.grad).any()) :
+                optim.step()
+
+    def update_successor(self, transitions, phis_model, policy_index):
+        torch.autograd.set_detect_anomaly(True)
         if transitions is None:
             return
 
-        states, actions, rs, phis, next_states, gammas = transitions
+        # phis aren't going to be calculated instead of use ReplayBuffer
+        states, actions, rs, _, next_states, gammas = transitions
         n_batch = len(gammas)
         indices = torch.arange(n_batch)
         gammas = gammas.reshape((-1, 1))
+        # Compute phis
+        # Phi version only have one shared phi
+        phi_model_tuple, _ = phis_model
+        phi_model, phi_loss, _ = phi_model_tuple
+        # target_phi_model, *_ = target_phi_tuple 
 
-        phi_model_tuple, target_phi_tuple = phis_models[policy_index]
-        phi_model, phi_loss, phi_optim = phi_model_tuple
-        target_phi_model, *_ = target_phi_tuple 
+        # Concat axis = 1 to concat per each batch
+        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1).detach().clone()
+        input_phi.requires_grad = False
+        phis = phi_model(input_phi)
 
         # next actions come from GPI
         q1, _ = self.GPI(next_states, policy_index)
@@ -105,13 +150,15 @@ class DeepSF_PHI(SF):
         
         # compute the targets and TD errors
         psi_tuple, target_psi_tuple = self.psi[policy_index]
-        psi_model, psi_loss, psi_optim = psi_tuple
+        psi_model, psi_loss, _ = psi_tuple
         target_psi_model, *_ = target_psi_tuple
 
         current_psi = psi_model(states)
         targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
 
         task_w = self.fit_w[policy_index]
+        for param in task_w.parameters():
+            param.requires_grad = False
         
         # train the SF network
         merge_current_target_psi = current_psi
@@ -119,43 +166,32 @@ class DeepSF_PHI(SF):
 
         #current_psi_clone = current_psi
         #merge_current_target_psi_clone = merge_current_target_psi
-        # Concat axis = 1 to concat per each batch
-        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1).detach().clone()
-        phi_loss_value = phi_loss(rs, task_w(phi_model(input_phi)))
+        phi_loss_value = phi_loss(task_w(phis), rs)
 
         # TODO How many times does phi vector should be updated?
+        # Only one phi vector with a weight_decay to learn smooth functions
         # psi_optim.zero_grad()
         optim = torch.optim.Adam(list(phi_model.parameters())
-                + list(psi_model.parameters())
-                + list(task_w.parameters()), lr=0.001)
+                + list(psi_model.parameters()), lr=0.0001, weight_decay=0.001)
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
         loss = phi_loss_value + psi_loss_value
-        loss.backward()
-        optim.step()
 
-        #psi_optim.step()
+        # This is only to avoid gradient exploiding or vanishing. While we 
+        # find a specific lr and wd
+        if not (torch.isnan(loss) or torch.isinf(loss)):
+            loss.backward(retain_graph=True)
+            optim.step()
 
-        #phi_optim.zero_grad()
-        #phi_loss_value = loss.detach().clone()
-        #phi_optim.step()
-
-        # phi_loss_value = phi_loss(current_psi_clone, merge_current_target_psi_clone)
-        #phi_loss_value.backward()
-        #phi_loss.backward()
-        #psi_optim.zero_grad()
-        #phi_optim.step()
-
-        # Finish train the SF network
-        
-        # update the target SF network
-        self.updates_since_target_updated[policy_index] += 1
-        if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
-            update_models_weights(psi_model, target_psi_model)
-            # We don't need target phi model
-            # update_models_weights(phi_model, target_phi_model)
-            self.updates_since_target_updated[policy_index] = 0
+            # Finish train the SF network
+            # update the target SF network
+            self.updates_since_target_updated[policy_index] += 1
+            if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
+                update_models_weights(psi_model, target_psi_model)
+                # We don't need target phi model
+                # update_models_weights(phi_model, target_phi_model)
+                self.updates_since_target_updated[policy_index] = 0
 
     def GPI_w(self, state, w):
         """
@@ -205,7 +241,7 @@ class DeepSF_PHI(SF):
         # build new reward function
         # TODO Remove task feature_dim should be called from the agent or config
         n_features = task.feature_dim()
-        fit_w = torch.nn.Linear(n_features, 1).to(self.device)
+        fit_w = torch.nn.Linear(n_features, 1, bias=False).to(self.device)
         
         self.fit_w.append(fit_w)
         self.true_w.append(true_w)
