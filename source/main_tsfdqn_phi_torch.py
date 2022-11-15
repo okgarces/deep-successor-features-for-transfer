@@ -21,6 +21,7 @@ gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
 use_gpu= gen_params.get('use_gpu', False) # Default GPU False
 use_logger= gen_params.get('use_logger', False) # Default GPU False
+n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default n_cycles_per_task is 1
 
 task_params = config_params['TASK']
 goals = task_params['train_targets']
@@ -105,16 +106,16 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
 def train():
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
-    print('building SFDQN with phi Learning')
+    print('building TSFDQN with phi Learning')
     deep_sf = DeepSF_TSF_PHI(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
     # sf_model_lambda could be another kind of lambda
-    sfdqn = TSFDQN_PHI(deep_sf=deep_sf, lambda_phi_model=phi_model_lambda, buffer=ReplayBuffer_TSF_PHI(sfdqn_params['buffer_params']),
+    tsfdqn = TSFDQN_PHI(deep_sf=deep_sf, lambda_phi_model=phi_model_lambda, buffer=ReplayBuffer_TSF_PHI(sfdqn_params['buffer_params']),
                   **sfdqn_params, **agent_params)
 
     # train SFDQN
-    print('training SFDQN')
+    print('training TSFDQN')
     train_tasks, test_tasks = generate_tasks(False)
     # sfdqn_perf = sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'])
-    sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'])
+    tsfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
 
 train()

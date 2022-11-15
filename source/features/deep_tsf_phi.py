@@ -85,6 +85,43 @@ class DeepSF_TSF_PHI(SF):
             predictions.append( self.get_successor(state, policy_index))
 
         return torch.stack(predictions, axis=1).to(self.device)
+
+    def update_reward(self, phi: torch.Tensor, r: torch.Tensor, task_index: int, exact=False) -> None:
+        """
+        Updates the reward parameters for the given task based on the observed reward sample
+        from the environment. 
+        
+        Parameters
+        ----------
+        phi : torch.Tensor 
+            the state features
+        r : torch.TensorFloat | torch.Tensor
+            the observed reward from the MDP
+        task_index : integer
+            the index of the task from which this reward was sampled
+        exact : boolean
+            if True, validates the true reward from the environment and the linear representation
+        """
+        
+        # update reward using linear regression
+        w = self.fit_w[task_index]
+        phi = phi.clone().detach().requires_grad_(False)
+        loss = torch.nn.MSELoss()
+        optim = torch.optim.SGD(w.parameters(), lr=0.005, weight_decay=0.01)
+        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
+
+        # TODO This could be removed?
+        for param in w.parameters():
+            param.requires_grad = True
+
+        optim.zero_grad()
+        l1 = loss(w(phi), r_tensor)
+        
+        # Otherwise gradients will be computed to inf or nan.
+        if not (torch.isnan(l1) or torch.isinf(l1)):
+            l1.backward()
+            if not (torch.isnan(w.weight.grad).any() or torch.isinf(w.weight.grad).any()) :
+                optim.step()
     
     def update_successor(self, transitions, phis_models, policy_index):
         if transitions is None:

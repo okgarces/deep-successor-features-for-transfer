@@ -21,7 +21,7 @@ gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
 use_gpu= gen_params.get('use_gpu', False) # Default GPU False
 use_logger= gen_params.get('use_logger', False) # Default GPU False
-n_cycles_per_task = gen_params.get('cycles_per_task', False) # Default GPU False
+n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default GPU False
 
 task_params = config_params['TASK']
 goals = task_params['train_targets']
@@ -118,45 +118,5 @@ def train():
     train_tasks, test_tasks = generate_tasks(False)
     # sfdqn_perf = sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'])
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
-
-    # build DQN
-    #print('building DQN')
-    #dqn = DQN(model_lambda=dqn_model_lambda, buffer=ReplayBuffer(dqn_params['buffer_params']),
-    #          **dqn_params, **agent_params)
-    
-    # training DQN
-    #print('training DQN')
-    #train_tasks, test_tasks = generate_tasks(True)
-    #dqn_perf = dqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'])
-
-    # smooth data    
-    #def smooth(y, box_pts):
-    #    return np.convolve(y, np.ones(box_pts) / box_pts, mode='same')
-
-    #sfdqn_perf = smooth(sfdqn_perf, 10)[:-5]
-    #dqn_perf = smooth(dqn_perf, 10)[:-5]
-    #x = np.linspace(0, 4, sfdqn_perf.size)
-    
-    # reporting progress
-    #ticksize = 14
-    #textsize = 18
-    #plt.rc('font', size=textsize)  # controls default text sizes
-    #plt.rc('axes', titlesize=textsize)  # fontsize of the axes title
-    #plt.rc('axes', labelsize=textsize)  # fontsize of the x and y labels
-    #plt.rc('xtick', labelsize=ticksize)  # fontsize of the tick labels
-    #plt.rc('ytick', labelsize=ticksize)  # fontsize of the tick labels
-    #plt.rc('legend', fontsize=ticksize)  # legend fontsize
-
-    #plt.figure(figsize=(8, 6))
-    #ax = plt.gca()
-    #ax.plot(x, sfdqn_perf, label='SFDQN')
-    #ax.plot(x, dqn_perf, label='DQN')
-    #plt.xlabel('training task index')
-    #plt.ylabel('averaged test episode reward')
-    #plt.title('Testing Reward Averaged over all Test Tasks')
-    #plt.tight_layout()
-    #plt.legend(frameon=False)
-    #plt.savefig('figures/sfdqn_return.png')
-
 
 train()

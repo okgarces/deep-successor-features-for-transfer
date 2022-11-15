@@ -199,25 +199,31 @@ class SFDQN_PHI(Agent):
             
     def test_agent(self, task, test_index):
         R = 0.0
-        # w = task.get_w()
         w = self.test_tasks_weights[test_index]
-
         s = task.initialize()
         s_enc = self.encoding(s)
-        for t_test in range(self.T):
+
+        accum_loss = 0
+        for _ in range(self.T):
             a = self.get_test_action(s_enc, w)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
+
+            # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            accum_loss += loss_t
+            # loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1, test_index)
+
+            # Update states
             s, s_enc = s1, s1_enc
             R += r
 
-            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-
-            if t_test % 250 == 0:
-                self.logger.log_target_error_progress(self.get_target_reward_mapper_error(r, loss_t, test_index, t_test))
-
             if done:
                 break
+
+        # Log accum loss for T
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, test_index, self.T))
+
         return R
 
     def update_test_reward_mapper(self, w_approx, r, s_enc, a, s1_enc):
@@ -237,7 +243,7 @@ class SFDQN_PHI(Agent):
         loss = loss_task(w_approx(phi), r_tensor)
 
         # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(loss)  or torch.isinf(loss)):
+        if not (torch.isnan(loss) or torch.isinf(loss)):
             loss.backward()
             if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
                 optim.step()
