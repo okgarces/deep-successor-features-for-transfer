@@ -235,11 +235,12 @@ class SFDQN_PHI(Agent):
 
         optim.zero_grad()
         loss = loss_task(w_approx(phi), r_tensor)
-        loss.backward()
 
         # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
-            optim.step()
+        if not (torch.isnan(loss)  or torch.isinf(loss)):
+            loss.backward()
+            if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
+                optim.step()
         # If inf loss
         return loss
     

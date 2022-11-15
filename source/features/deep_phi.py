@@ -107,7 +107,7 @@ class DeepSF_PHI(SF):
         w = self.fit_w[task_index]
         phi = phi.clone().detach().requires_grad_(False)
         loss = torch.nn.MSELoss()
-        optim = torch.optim.SGD(w.parameters(), lr=0.005)
+        optim = torch.optim.SGD(w.parameters(), lr=0.005, weight_decay=0.01)
         r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
 
         # TODO This could be removed?
@@ -116,11 +116,12 @@ class DeepSF_PHI(SF):
 
         optim.zero_grad()
         l1 = loss(w(phi), r_tensor)
-        l1.backward()
         
         # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(w.weight.grad).any() or torch.isinf(w.weight.grad).any()) :
-            optim.step()
+        if not (torch.isnan(l1) or torch.isinf(l1)):
+            l1.backward()
+            if not (torch.isnan(w.weight.grad).any() or torch.isinf(w.weight.grad).any()) :
+                optim.step()
 
     def update_successor(self, transitions, phis_model, policy_index):
         torch.autograd.set_detect_anomaly(True)
@@ -171,22 +172,26 @@ class DeepSF_PHI(SF):
         # Only one phi vector with a weight_decay to learn smooth functions
         # psi_optim.zero_grad()
         optim = torch.optim.Adam(list(phi_model.parameters())
-                + list(psi_model.parameters()), lr=0.001, weight_decay=0.01)
+                + list(psi_model.parameters()), lr=0.0001, weight_decay=0.001)
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
         loss = phi_loss_value + psi_loss_value
-        loss.backward(retain_graph=True)
-        optim.step()
 
-        # Finish train the SF network
-        # update the target SF network
-        self.updates_since_target_updated[policy_index] += 1
-        if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
-            update_models_weights(psi_model, target_psi_model)
-            # We don't need target phi model
-            # update_models_weights(phi_model, target_phi_model)
-            self.updates_since_target_updated[policy_index] = 0
+        # This is only to avoid gradient exploiding or vanishing. While we 
+        # find a specific lr and wd
+        if not (torch.isnan(loss) or torch.isinf(loss)):
+            loss.backward(retain_graph=True)
+            optim.step()
+
+            # Finish train the SF network
+            # update the target SF network
+            self.updates_since_target_updated[policy_index] += 1
+            if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
+                update_models_weights(psi_model, target_psi_model)
+                # We don't need target phi model
+                # update_models_weights(phi_model, target_phi_model)
+                self.updates_since_target_updated[policy_index] = 0
 
     def GPI_w(self, state, w):
         """
