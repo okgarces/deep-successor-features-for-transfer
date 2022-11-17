@@ -118,7 +118,11 @@ class DeepSF_PHI(SF):
         l1 = loss(w(phi), r_tensor)
         
         # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(l1) or torch.isinf(l1)):
+        if True and not (torch.isnan(l1) or torch.isinf(l1)):
+            if (torch.isnan(l1) or torch.isinf(l1)):
+                print(f'loss target task {loss}')
+                print(f'task_w weights target {w.weight}')
+                print(f'phis in targte reward mapper {phi}')
             l1.backward()
             if not (torch.isnan(w.weight.grad).any() or torch.isinf(w.weight.grad).any()) :
                 optim.step()
@@ -178,9 +182,19 @@ class DeepSF_PHI(SF):
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
         loss = phi_loss_value + psi_loss_value
 
+
         # This is only to avoid gradient exploiding or vanishing. While we 
         # find a specific lr and wd
-        if not (torch.isnan(loss) or torch.isinf(loss)):
+        if True or (not (torch.isnan(loss) or torch.isinf(loss))):
+            if (torch.isnan(loss) or torch.isinf(loss)):
+                print(f'loss {loss}')
+                print(f'phi_loss_value {phi_loss_value}')
+                print(f'psi_loss_value {psi_loss_value}')
+                print(f'task_w weights {task_w.weight}')
+                print(f'phi model {phi_model.parameters()}')
+                print(f'task_w {task_w(phis)}')
+                print(f'phis {phis}')
+
             loss.backward(retain_graph=True)
             optim.step()
 

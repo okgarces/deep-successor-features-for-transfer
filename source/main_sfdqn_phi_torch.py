@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-  
 import matplotlib.pyplot as plt
-import numpy as np
 
 from agents.sfdqn_phi import SFDQN_PHI
 from features.deep_phi import DeepSF_PHI
@@ -11,8 +10,10 @@ from utils.torch import set_torch_device, get_activation
 from utils.logger import set_logger_level
 from utils.types import ModelTuple
 
-import torch
 from collections import OrderedDict
+import torch
+import random
+import numpy as np
 
 # read parameters from config file
 config_params = parse_config_file('reacher_phi.cfg')
@@ -36,6 +37,16 @@ phi_params = config_params['PHI']
 # Config GPU for Torch and logger
 device = set_torch_device(use_gpu=use_gpu)
 logger = set_logger_level(use_logger=use_logger)
+
+# manual seed
+seed = 100
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+np.random.seed(seed)
+random.seed(seed)
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 # tasks
 def generate_tasks(include_target):

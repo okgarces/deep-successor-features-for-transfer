@@ -243,7 +243,13 @@ class SFDQN_PHI(Agent):
         loss = loss_task(w_approx(phi), r_tensor)
 
         # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(loss) or torch.isinf(loss)):
+        if True and not (torch.isnan(loss) or torch.isinf(loss)):
+            if (torch.isnan(loss) or torch.isinf(loss)):
+                print(f'loss target task {loss}')
+                print(f'task_w weights target {w_approx.weight}')
+                print(f'phi model in target {phi_model.parameters()}')
+                print(f'phis in targte reward mapper {phi}')
+
             loss.backward()
             if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
                 optim.step()

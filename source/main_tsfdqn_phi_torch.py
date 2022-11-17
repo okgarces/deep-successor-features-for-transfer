@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-  
 import matplotlib.pyplot as plt
-import numpy as np
 
 from agents.tsfdqn_phi import TSFDQN_PHI
 from features.deep_tsf_phi import DeepSF_TSF_PHI 
@@ -12,6 +11,8 @@ from utils.logger import set_logger_level
 from utils.types import ModelTuple
 
 import torch
+import numpy as np
+import random
 from collections import OrderedDict
 
 # read parameters from config file
@@ -36,6 +37,16 @@ phi_params = config_params['PHI']
 # Config GPU for Torch and logger
 device = set_torch_device(use_gpu=use_gpu)
 logger = set_logger_level(use_logger=use_logger)
+
+# manual seed
+seed = 1024
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+np.random.seed(seed)
+random.seed(seed)
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 # tasks
 def generate_tasks(include_target):
