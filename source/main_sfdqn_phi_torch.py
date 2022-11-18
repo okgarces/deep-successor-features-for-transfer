@@ -62,16 +62,17 @@ def phi_model_lambda(s_enc_dim, action_dim, feature_dim) -> ModelTuple:
 
     feature_dim = phi_params['n_features']
 
+    total_inputs = np.sum([s_enc_dim, action_dim, s_enc_dim])
     model = torch.nn.Sequential(
-        torch.nn.Linear(np.sum([s_enc_dim, action_dim, s_enc_dim]), 2048),
+        torch.nn.Linear(total_inputs, total_inputs * 2),
         torch.nn.ReLU(),
-        torch.nn.Linear(2048, 2048),
+        torch.nn.Linear(total_inputs * 2, total_inputs * 2),
         torch.nn.ReLU(),
-        torch.nn.Linear(2048, 2048),
+        torch.nn.Linear(total_inputs * 2, total_inputs * 2),
         torch.nn.ReLU(),
-        torch.nn.Linear(2048, 2048),
+        torch.nn.Linear(total_inputs * 2, total_inputs * 2),
         torch.nn.ReLU(),
-        torch.nn.Linear(2048, feature_dim)
+        torch.nn.Linear(total_inputs * 2, feature_dim),
     ).to(device)
     optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss = torch.nn.MSELoss().to(device)
