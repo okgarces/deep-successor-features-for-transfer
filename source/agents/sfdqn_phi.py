@@ -72,18 +72,20 @@ class SFDQN_PHI(Agent):
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         # update w
-        phi_tuple, *_ = self.phi
-        phi_model, *_ = phi_tuple
+        #phi_tuple, *_ = self.phi
+        #phi_model, *_ = phi_tuple
 
         #self.sf.update_reward(phi, r, self.task_index)
         
+        # TODO This changes are to update rewards and phi, psi simultaneously. Different to 
+        # Original SFDQN algorithm
         # remember this experience
-        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+        #input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
 
         # Update Reward Mapper
-        phi = phi_model(input_phi)
-        phi = phi.clone().detach().requires_grad_(False)
-        self.sf.update_reward(phi, r, self.task_index)
+        # phi = phi_model(input_phi)
+        # phi = phi.clone().detach().requires_grad_(False)
+        # self.sf.update_reward(phi, r, self.task_index)
         # phis should not be in buffer
         self.buffer.append(s_enc, a, r, torch.tensor([]), s1_enc, gamma)
         

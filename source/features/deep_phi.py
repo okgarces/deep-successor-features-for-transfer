@@ -161,8 +161,8 @@ class DeepSF_PHI(SF):
         targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
 
         task_w = self.fit_w[policy_index]
-        for param in task_w.parameters():
-            param.requires_grad = False
+        # for param in task_w.parameters():
+        #     param.requires_grad = False
         
         # train the SF network
         merge_current_target_psi = current_psi
@@ -175,9 +175,12 @@ class DeepSF_PHI(SF):
         # TODO How many times does phi vector should be updated?
         # Only one phi vector with a weight_decay to learn smooth functions
         # psi_optim.zero_grad()
+        # TODO This change is to optimize w with only one Loss. Different to the original.
+        # The original first fit the w and then use GPI. This updates simultaneously
         params = [
                 {'params': phi_model.parameters(), 'lr': 1e-6, 'weight_decay': 1e-4},
-                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3}
+                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3},
+                {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         ]
         optim = torch.optim.Adam(params)
         optim.zero_grad()
