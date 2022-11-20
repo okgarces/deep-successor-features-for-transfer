@@ -177,17 +177,21 @@ class DeepSF_PHI(SF):
         # psi_optim.zero_grad()
         # TODO This change is to optimize w with only one Loss. Different to the original.
         # The original first fit the w and then use GPI. This updates simultaneously
+        # params = [
+        #         {'params': phi_model.parameters(), 'lr': 1e-6, 'weight_decay': 1e-4},
+        #         {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3},
+        #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
+        # ]
         params = [
-                {'params': phi_model.parameters(), 'lr': 1e-6, 'weight_decay': 1e-4},
-                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3},
-                {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
+                {'params': phi_model.parameters(), 'lr': 1e-4,},
+                {'params': psi_model.parameters(), 'lr': 1e-3 },
+                {'params': task_w.parameters()}
         ]
         optim = torch.optim.Adam(params)
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
         loss = phi_loss_value + psi_loss_value
-
 
         # This is only to avoid gradient exploiding or vanishing. While we 
         # find a specific lr and wd
@@ -202,6 +206,12 @@ class DeepSF_PHI(SF):
                 print(f'phis {phis}')
 
             loss.backward(retain_graph=True)
+            
+            # Clamp weights between -1 and 1
+            for param_dict in params:
+                for params in param_dict.get('params', []):
+                    params.grad.data.clamp_(-1, 1)
+
             optim.step()
 
             # Finish train the SF network
