@@ -1,4 +1,7 @@
 import torch
+import numpy as np
+import random
+import os
 
 device = None 
 
@@ -28,3 +31,17 @@ def get_activation(name):
 def update_models_weights(model: torch.nn.Module, target_model: torch.nn.Module):
     for target_param, model_param in zip(target_model.parameters(), model.parameters()):
         target_param.data.copy_(model_param.data)
+
+
+def set_random_seed(seed = 1024) -> None:
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    print(f'Random seed set as {seed}')
