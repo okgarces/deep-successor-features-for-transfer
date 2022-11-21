@@ -92,8 +92,11 @@ class SFDQN_PHI(Agent):
         # update SFs
         if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
-            for index in range(self.n_tasks):
-                self.sf.update_successor(transitions, self.phi, index)
+            # TODO Version 5.4
+            self.sf.update_successor(transitions, self.phi, self.task_index)
+            # TODO this from original impl.
+            #for index in range(self.n_tasks):
+            #    self.sf.update_successor(transitions, self.phi, index)
         
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -170,6 +173,8 @@ class SFDQN_PHI(Agent):
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
                 self.set_active_training_task(index)
+                # TODO Version 5.4
+                self.buffer.reset()
                 for t in range(n_samples):
                     
                     # train
@@ -234,7 +239,7 @@ class SFDQN_PHI(Agent):
         phi_model, *_ = phi_tuple
 
         input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
-        phi = phi_model(input_phi).clone().detach().requires_grad_(False)
+        phi = phi_model(input_phi).detach()
 
         optim = torch.optim.SGD(w_approx.parameters(), lr=0.005, weight_decay=0.01)
         loss_task = torch.nn.MSELoss()

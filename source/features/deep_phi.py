@@ -118,7 +118,7 @@ class DeepSF_PHI(SF):
         l1 = loss(w(phi), r_tensor)
         
         # Otherwise gradients will be computed to inf or nan.
-        if True and not (torch.isnan(l1) or torch.isinf(l1)):
+        if True or not (torch.isnan(l1) or torch.isinf(l1)):
             if (torch.isnan(l1) or torch.isinf(l1)):
                 print(f'loss target task {loss}')
                 print(f'task_w weights target {w.weight}')
