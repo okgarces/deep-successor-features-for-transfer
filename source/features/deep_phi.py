@@ -144,8 +144,7 @@ class DeepSF_PHI(SF):
         # target_phi_model, *_ = target_phi_tuple 
 
         # Concat axis = 1 to concat per each batch
-        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1).detach().clone()
-        input_phi.requires_grad = False
+        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1).detach()
         phis = phi_model(input_phi)
 
         # next actions come from GPI
