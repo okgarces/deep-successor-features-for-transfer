@@ -183,9 +183,9 @@ class DeepSF_PHI(SF):
         #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         # ]
         params = [
-                {'params': phi_model.parameters(), 'lr': 1e-4,},
+                {'params': phi_model.parameters(), 'lr': 1e-5,},
                 {'params': psi_model.parameters(), 'lr': 1e-3 },
-                {'params': task_w.parameters()}
+                {'params': task_w.parameters(), 'lr': 1e-3 }
         ]
         optim = torch.optim.Adam(params)
         optim.zero_grad()
