@@ -258,8 +258,12 @@ class SFDQN_PHI(Agent):
                 print(f'phis in targte reward mapper {phi}')
 
             loss.backward()
-            if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
-                optim.step()
+
+            # Clamp weights between -1 and 1
+            for params in w_approx.parameters():
+                params.grad.data.clamp_(-1, 1)
+
+            optim.step()
         # If inf loss
         return loss
     
