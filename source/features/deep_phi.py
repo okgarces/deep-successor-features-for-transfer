@@ -6,6 +6,8 @@ import torch
 import numpy as np
 
 
+torch.autograd.set_detect_anomaly(True)
+
 class DeepSF_PHI(SF):
     """
     A successor feature representation implemented using Keras. Accepts a wide variety of neural networks as
@@ -105,14 +107,9 @@ class DeepSF_PHI(SF):
         
         # update reward using linear regression
         w = self.fit_w[task_index]
-        phi = phi.clone().detach().requires_grad_(False)
         loss = torch.nn.MSELoss()
         optim = torch.optim.SGD(w.parameters(), lr=0.005, weight_decay=0.01)
         r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
-
-        # TODO This could be removed?
-        for param in w.parameters():
-            param.requires_grad = True
 
         optim.zero_grad()
         l1 = loss(w(phi), r_tensor)
@@ -124,11 +121,15 @@ class DeepSF_PHI(SF):
                 print(f'task_w weights target {w.weight}')
                 print(f'phis in targte reward mapper {phi}')
             l1.backward()
-            if not (torch.isnan(w.weight.grad).any() or torch.isinf(w.weight.grad).any()) :
-                optim.step()
+
+            # Clamp weights between -1 and 1
+            for params in w.parameters():
+                params.grad.data.clamp_(-1, 1)
+
+            optim.step()
 
     def update_successor(self, transitions, phis_model, policy_index):
-        torch.autograd.set_detect_anomaly(True)
+
         if transitions is None:
             return
 
@@ -157,7 +158,8 @@ class DeepSF_PHI(SF):
         target_psi_model, *_ = target_psi_tuple
 
         current_psi = psi_model(states)
-        targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
+        # We don't need target_psi gradients
+        targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:].detach()
 
         task_w = self.fit_w[policy_index]
         # for param in task_w.parameters():
@@ -169,7 +171,8 @@ class DeepSF_PHI(SF):
 
         #current_psi_clone = current_psi
         #merge_current_target_psi_clone = merge_current_target_psi
-        phi_loss_value = phi_loss(task_w(phis), rs)
+        r_fit = task_w(phis).detach()
+        phi_loss_value = phi_loss(r_fit, rs)
 
         # TODO How many times does phi vector should be updated?
         # Only one phi vector with a weight_decay to learn smooth functions
@@ -182,9 +185,9 @@ class DeepSF_PHI(SF):
         #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         # ]
         params = [
-                {'params': phi_model.parameters(), 'lr': 1e-5,},
-                {'params': psi_model.parameters(), 'lr': 1e-3 },
-                {'params': task_w.parameters(), 'lr': 1e-3 }
+                {'params': phi_model.parameters(), 'lr': 1e-5, 'weight_decay': 1e-2 },
+                {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
+                # {'params': task_w.parameters(), 'lr': 1e-3 }
         ]
         optim = torch.optim.Adam(params)
         optim.zero_grad()

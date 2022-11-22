@@ -72,15 +72,15 @@ class SFDQN_PHI(Agent):
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         # update w
-        #phi_tuple, *_ = self.phi
-        #phi_model, *_ = phi_tuple
+        # phi_tuple, *_ = self.phi
+        # phi_model, *_ = phi_tuple
 
         #self.sf.update_reward(phi, r, self.task_index)
         
         # TODO This changes are to update rewards and phi, psi simultaneously. Different to 
         # Original SFDQN algorithm
         # remember this experience
-        #input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
 
         # Update Reward Mapper
         # phi = phi_model(input_phi)
@@ -92,11 +92,17 @@ class SFDQN_PHI(Agent):
         # update SFs
         if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
-            # TODO Version 5.4
-            self.sf.update_successor(transitions, self.phi, self.task_index)
-            # TODO this from original impl.
-            #for index in range(self.n_tasks):
-            #    self.sf.update_successor(transitions, self.phi, index)
+
+            # Update successor and phi
+            for index in range(self.n_tasks):
+                self.sf.update_successor(transitions, self.phi, index)
+
+            # Get updated phi 
+            phi_tuple, *_ = self.phi
+            phi_model, *_ = phi_tuple
+            # Update Reward Mapper
+            phi = phi_model(input_phi).detach()
+            self.sf.update_reward(phi, r, self.task_index)
         
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -173,8 +179,6 @@ class SFDQN_PHI(Agent):
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
                 self.set_active_training_task(index)
-                # TODO Version 5.4
-                self.buffer.reset()
                 for t in range(n_samples):
                     
                     # train
