@@ -221,7 +221,7 @@ class SFDQN_PHI(Agent):
             s1_enc = self.encoding(s1)
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+            loss_t = self.update_test_reward_mapper(w, r, s_enc, a, s1_enc).item()
             accum_loss += loss_t
             # loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1, test_index)
 
