@@ -123,12 +123,12 @@ class DeepSF_PHI(SF):
             l1.backward()
 
             # Clamp weights between -1 and 1
-            for params in w.parameters():
-                params.grad.data.clamp_(-1, 1)
+            #for params in w.parameters():
+            #    params.grad.data.clamp_(-1, 1)
 
             optim.step()
 
-    def update_successor(self, transitions, phis_model, policy_index):
+    def update_successor(self, transitions, phis_model, policy_index, apply_optim_all=True):
 
         if transitions is None:
             return
@@ -171,8 +171,7 @@ class DeepSF_PHI(SF):
 
         #current_psi_clone = current_psi
         #merge_current_target_psi_clone = merge_current_target_psi
-        r_fit = task_w(phis).detach()
-        phi_loss_value = phi_loss(r_fit, rs)
+        r_fit = task_w(phis)
 
         # TODO How many times does phi vector should be updated?
         # Only one phi vector with a weight_decay to learn smooth functions
@@ -185,10 +184,20 @@ class DeepSF_PHI(SF):
         #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         # ]
         params = [
-                {'params': phi_model.parameters(), 'lr': 1e-5, 'weight_decay': 1e-2 },
                 {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
-                # {'params': task_w.parameters(), 'lr': 1e-3 }
+                {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 }
         ]
+
+        if not apply_optim_all:
+            # Remove task_w parameters and from optimization
+            # Remove phi model
+            params.pop()
+            params.pop()
+            r_fit = r_fit.detach()
+            phis = phis.detach()
+
+        phi_loss_value = phi_loss(r_fit, rs)
         optim = torch.optim.Adam(params)
         optim.zero_grad()
 
@@ -203,16 +212,16 @@ class DeepSF_PHI(SF):
                 print(f'phi_loss_value {phi_loss_value}')
                 print(f'psi_loss_value {psi_loss_value}')
                 print(f'task_w weights {task_w.weight}')
-                print(f'phi model {phi_model.parameters()}')
+                print(f'phi model {[param.data for param in phi_model.parameters()]}')
                 print(f'task_w {task_w(phis)}')
                 print(f'phis {phis}')
 
             loss.backward(retain_graph=True)
             
             # Clamp weights between -1 and 1
-            for param_dict in params:
-                for params in param_dict.get('params', []):
-                    params.grad.data.clamp_(-1, 1)
+            #for param_dict in params:
+            #    for params in param_dict.get('params', []):
+            #        params.grad.data.clamp_(-1, 1)
 
             optim.step()
 

@@ -93,16 +93,20 @@ class SFDQN_PHI(Agent):
         if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
 
+            # Apply learning to reward mapper
+            apply_optim_all = self.total_training_steps < 100000
             # Update successor and phi
             for index in range(self.n_tasks):
-                self.sf.update_successor(transitions, self.phi, index)
+                self.sf.update_successor(transitions, self.phi, index, apply_optim_all)
 
             # Get updated phi 
-            phi_tuple, *_ = self.phi
-            phi_model, *_ = phi_tuple
-            # Update Reward Mapper
-            phi = phi_model(input_phi).detach()
-            self.sf.update_reward(phi, r, self.task_index)
+            # Ridoff and only apply Apply learning to reward mapper
+            if not apply_optim_all:
+              phi_tuple, *_ = self.phi
+              phi_model, *_ = phi_tuple
+              # Update Reward Mapper
+              phi = phi_model(input_phi).detach()
+              self.sf.update_reward(phi, r, self.task_index)
         
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -258,14 +262,14 @@ class SFDQN_PHI(Agent):
             if (torch.isnan(loss) or torch.isinf(loss)):
                 print(f'loss target task {loss}')
                 print(f'task_w weights target {w_approx.weight}')
-                print(f'phi model in target {phi_model.parameters()}')
+                print(f'phi model in target {[param.data for param in phi_model.parameters()]}')
                 print(f'phis in targte reward mapper {phi}')
 
             loss.backward()
 
-            # Clamp weights between -1 and 1
-            for params in w_approx.parameters():
-                params.grad.data.clamp_(-1, 1)
+            # # Clamp weights between -1 and 1
+            # for params in w_approx.parameters():
+            #   params.grad.data.clamp_(-1, 1)
 
             optim.step()
         # If inf loss
