@@ -13,7 +13,7 @@ from utils.torch import update_models_weights
 
 class SFDQN_PHI(Agent):
 
-    def __init__(self, deep_sf, lambda_phi_model, buffer, *args, use_gpi=True, test_epsilon=0.03, **kwargs):
+    def __init__(self, deep_sf, lambda_phi_model, replay_buffer_handle, *args, use_gpi=True, test_epsilon=0.03, **kwargs):
         """
         Creates a new SFDQN agent per the specifications in the original paper.
         
@@ -31,7 +31,7 @@ class SFDQN_PHI(Agent):
         """
         super(SFDQN_PHI, self).__init__(*args, **kwargs)
         self.sf = deep_sf
-        self.buffer = buffer
+        self.replay_buffer_handle = replay_buffer_handle
         self.use_gpi = use_gpi
         self.test_epsilon = test_epsilon
 
@@ -41,8 +41,8 @@ class SFDQN_PHI(Agent):
         # phi learning
         self.lambda_phi_model = lambda_phi_model
         self.phi: Tuple[ModelTuple, ModelTuple]
-        self.updates_since_phi_target_updated = []
         self.test_tasks_weights = []
+        self.buffers = []
 
     def set_active_training_task(self, index):
         """
@@ -62,6 +62,9 @@ class SFDQN_PHI(Agent):
         self.steps, self.reward = 0, 0.
         self.epsilon = self.epsilon_init
         self.episode_reward_hist = []
+
+        # Set buffer to current task buffer
+        self.buffer = self.buffers[index]
         
     def get_Q_values(self, s, s_enc):
         q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
@@ -80,7 +83,7 @@ class SFDQN_PHI(Agent):
         # TODO This changes are to update rewards and phi, psi simultaneously. Different to 
         # Original SFDQN algorithm
         # remember this experience
-        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+        #input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
 
         # Update Reward Mapper
         # phi = phi_model(input_phi)
@@ -94,25 +97,17 @@ class SFDQN_PHI(Agent):
             transitions = self.buffer.replay()
 
             # Apply learning to reward mapper
-            apply_optim_all = self.total_training_steps < 100000
             # Update successor and phi
-            for index in range(self.n_tasks):
-                self.sf.update_successor(transitions, self.phi, index, apply_optim_all)
+            #for index in range(self.n_tasks):
+            self.sf.update_successor(transitions, self.phi, self.task_index)
 
-            # Get updated phi 
-            # Ridoff and only apply Apply learning to reward mapper
-            if not apply_optim_all:
-              phi_tuple, *_ = self.phi
-              phi_model, *_ = phi_tuple
-              # Update Reward Mapper
-              phi = phi_model(input_phi).detach()
-              self.sf.update_reward(phi, r, self.task_index)
-        
     def reset(self):
         super(SFDQN_PHI, self).reset()
         self.sf.reset()
-        self.buffer.reset()
-        self.updates_since_phi_target_updated = []
+
+        # Reset all buffers
+        for buffer in self.buffers:
+            buffer.reset()
 
     def add_training_task(self, task):
         """
@@ -133,6 +128,7 @@ class SFDQN_PHI(Agent):
             # After initial values 
             self.phi = self.init_phi_model()
         self.sf.add_training_task(task, source=None)
+        self.buffers.append(self.replay_buffer_handle())
 
     ############# phi Model Learning ####################
     def init_phi_model(self):
@@ -141,8 +137,6 @@ class SFDQN_PHI(Agent):
 
         update_models_weights(phi_model, phi_target_model)
         # TODO This variable could be removed
-        self.updates_since_phi_target_updated.append(0)
-
         return (phi_model, phi_loss, phi_optim), (phi_target_model, phi_target_loss, phi_target_optim)
 
     ############## Progress and Stats ###################
@@ -180,11 +174,11 @@ class SFDQN_PHI(Agent):
         # train each one
         return_data = []
         # Cycles per task
+        
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
                 self.set_active_training_task(index)
                 for t in range(n_samples):
-                    
                     # train
                     self.next_sample(viewer, n_view_ev)
                     

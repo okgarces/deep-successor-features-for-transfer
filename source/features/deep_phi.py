@@ -128,7 +128,7 @@ class DeepSF_PHI(SF):
 
             optim.step()
 
-    def update_successor(self, transitions, phis_model, policy_index, apply_optim_all=True):
+    def update_successor(self, transitions, phis_model, policy_index):
 
         if transitions is None:
             return
@@ -143,13 +143,15 @@ class DeepSF_PHI(SF):
         phi_model_tuple, _ = phis_model
         phi_model, phi_loss, _ = phi_model_tuple
         # target_phi_model, *_ = target_phi_tuple 
+        task_w = self.fit_w[policy_index]
 
         # Concat axis = 1 to concat per each batch
         input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1).detach()
         phis = phi_model(input_phi)
 
-        # next actions come from GPI
-        q1, _ = self.GPI(next_states, policy_index)
+        # next actions come from current Successor Feature
+        sf = self.get_successor(next_states, policy_index)
+        q1 = task_w(sf)
         next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
         
         # compute the targets and TD errors
@@ -161,7 +163,6 @@ class DeepSF_PHI(SF):
         # We don't need target_psi gradients
         targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:].detach()
 
-        task_w = self.fit_w[policy_index]
         # for param in task_w.parameters():
         #     param.requires_grad = False
         
@@ -188,14 +189,6 @@ class DeepSF_PHI(SF):
                 {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
                 {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 }
         ]
-
-        if not apply_optim_all:
-            # Remove task_w parameters and from optimization
-            # Remove phi model
-            params.pop()
-            params.pop()
-            r_fit = r_fit.detach()
-            phis = phis.detach()
 
         phi_loss_value = phi_loss(r_fit, rs)
         optim = torch.optim.Adam(params)

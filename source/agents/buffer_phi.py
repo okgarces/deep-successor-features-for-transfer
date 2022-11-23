@@ -22,6 +22,9 @@ class ReplayBuffer_PHI:
         self.n_batch = n_batch
 
         self.device = get_torch_device()
+
+        # When initialize run reset()
+        self.reset()
     
     def reset(self):
         """

@@ -109,13 +109,16 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
 
     return model, loss, optim
 
+def replay_buffer_handle():
+    return ReplayBuffer_PHI(sfdqn_params['buffer_params'])
+
 def train():
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
     print('building SFDQN with phi Learning')
     deep_sf = DeepSF_PHI(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
     # sf_model_lambda could be another kind of lambda
-    sfdqn = SFDQN_PHI(deep_sf=deep_sf, lambda_phi_model=phi_model_lambda, buffer=ReplayBuffer_PHI(sfdqn_params['buffer_params']),
+    sfdqn = SFDQN_PHI(deep_sf=deep_sf, lambda_phi_model=phi_model_lambda, replay_buffer_handle=replay_buffer_handle,
                   **sfdqn_params, **agent_params)
 
     # train SFDQN
