@@ -152,7 +152,13 @@ class DeepSF_PHI(SF):
         # next actions come from current Successor Feature
         sf = self.get_successor(next_states, policy_index)
         q1 = task_w(sf)
-        next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
+        # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
+        next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
+
+        #q1, c = self.GPI(next_states, policy_index)
+        #print(f'Q1 here {q1.shape}')
+        #print(f'C here {c}')
+        #next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
         
         # compute the targets and TD errors
         psi_tuple, target_psi_tuple = self.psi[policy_index]
