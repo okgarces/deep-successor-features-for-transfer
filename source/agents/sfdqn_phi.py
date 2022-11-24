@@ -262,8 +262,8 @@ class SFDQN_PHI(Agent):
             loss.backward()
 
             # Clamp weights between -1 and 1
-            for params in w_approx.parameters():
-                params.grad.data.clamp_(-1, 1)
+            #for params in w_approx.parameters():
+            #    params.grad.data.clamp_(-1, 1)
 
             optim.step()
         # If inf loss
