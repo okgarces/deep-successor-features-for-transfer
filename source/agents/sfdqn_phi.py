@@ -243,7 +243,7 @@ class SFDQN_PHI(Agent):
         input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
         phi = phi_model(input_phi).detach()
 
-        optim = torch.optim.SGD(w_approx.parameters(), lr=0.005, weight_decay=0.01)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=5e-4, weight_decay=1e-4)
         loss_task = torch.nn.MSELoss()
 
         r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
@@ -261,9 +261,9 @@ class SFDQN_PHI(Agent):
 
             loss.backward()
 
-            # # Clamp weights between -1 and 1
-            # for params in w_approx.parameters():
-            #   params.grad.data.clamp_(-1, 1)
+            # Clamp weights between -1 and 1
+            for params in w_approx.parameters():
+                params.grad.data.clamp_(-1, 1)
 
             optim.step()
         # If inf loss
