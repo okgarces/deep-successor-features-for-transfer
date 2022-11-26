@@ -240,16 +240,18 @@ class SFDQN_PHI(Agent):
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+        input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
         phi = phi_model(input_phi).detach()
 
-        optim = torch.optim.SGD(w_approx.parameters(), lr=5e-4, weight_decay=1e-4)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-4, weight_decay=1e-3)
         loss_task = torch.nn.MSELoss()
 
-        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
+        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().to(self.device)
+
+        r_fit = w_approx(phi)
 
         optim.zero_grad()
-        loss = loss_task(w_approx(phi), r_tensor)
+        loss = loss_task(r_fit, r_tensor)
 
         # Otherwise gradients will be computed to inf or nan.
         if True or not (torch.isnan(loss) or torch.isinf(loss)):
@@ -260,11 +262,6 @@ class SFDQN_PHI(Agent):
                 print(f'phis in targte reward mapper {phi}')
 
             loss.backward()
-
-            # Clamp weights between -1 and 1
-            #for params in w_approx.parameters():
-            #    params.grad.data.clamp_(-1, 1)
-
             optim.step()
         # If inf loss
         return loss
