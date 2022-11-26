@@ -128,7 +128,7 @@ class DeepSF_PHI(SF):
 
             optim.step()
 
-    def update_successor(self, transitions, phis_model, policy_index):
+    def update_successor(self, transitions, phis_model, policy_index, use_gpi):
 
         if transitions is None:
             return
@@ -150,10 +150,14 @@ class DeepSF_PHI(SF):
         phis = phi_model(input_phi)
 
         # next actions come from current Successor Feature
-        sf = self.get_successor(next_states, policy_index)
-        q1 = task_w(sf)
-        # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
-        next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
+        if use_gpi:
+            q1, _ = self.GPI(next_states, policy_index)
+            next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
+        else:
+            sf = self.get_successor(next_states, policy_index)
+            q1 = task_w(sf)
+            # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
+            next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
 
         #q1, c = self.GPI(next_states, policy_index)
         #print(f'Q1 here {q1.shape}')

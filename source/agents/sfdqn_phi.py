@@ -94,12 +94,13 @@ class SFDQN_PHI(Agent):
         
         # update SFs
         if self.total_training_steps % 1 == 0:
-            transitions = self.buffer.replay()
 
             # Apply learning to reward mapper
             # Update successor and phi
-            #for index in range(self.n_tasks):
-            self.sf.update_successor(transitions, self.phi, self.task_index)
+            for index in range(self.n_tasks):
+                transitions = self.buffers[index].replay()
+                # Update successor using transitions per source task and GPI to update successor
+                self.sf.update_successor(transitions, self.phi, index, True)
 
     def reset(self):
         super(SFDQN_PHI, self).reset()
