@@ -140,7 +140,7 @@ class SFDQN_PHI(Agent):
         self.buffers.append(self.replay_buffer_handle())
 
         # Coefficients
-        self.loss_coefficients.append(torch.nn.Linear(1, 1, bias=False))
+        self.loss_coefficients.append(torch.nn.Linear(1, 1, bias=False).to(self.device))
 
     ############# phi Model Learning ####################
     def init_phi_model(self):
