@@ -128,7 +128,7 @@ class DeepSF_PHI(SF):
 
             optim.step()
 
-    def update_successor(self, transitions, phis_model, policy_index, use_gpi):
+    def update_successor(self, transitions, phis_model, policy_index, loss_coefficient, use_gpi):
 
         if transitions is None:
             return
@@ -177,7 +177,7 @@ class DeepSF_PHI(SF):
         #     param.requires_grad = False
         
         # train the SF network
-        merge_current_target_psi = current_psi
+        merge_current_target_psi = current_psi.clone()
         merge_current_target_psi[indices, actions,:] = targets
 
         #current_psi_clone = current_psi
@@ -197,45 +197,51 @@ class DeepSF_PHI(SF):
         params = [
                 {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
                 {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 }
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
+                {'params': loss_coefficient.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 }
         ]
 
-        phi_loss_value = phi_loss(r_fit, rs)
+        phi_loss_value = phi_loss(r_fit, rs).unsqueeze(0)
         optim = torch.optim.Adam(params)
         optim.zero_grad()
 
-        psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
-        loss = phi_loss_value + psi_loss_value
+        psi_loss_value = psi_loss(current_psi, merge_current_target_psi).unsqueeze(0)
+        loss = phi_loss_value + loss_coefficient(psi_loss_value)
 
         # This is only to avoid gradient exploiding or vanishing. While we 
         # find a specific lr and wd
-        if True or (not (torch.isnan(loss) or torch.isinf(loss))):
-            if (torch.isnan(loss) or torch.isinf(loss)):
-                print(f'loss {loss}')
-                print(f'phi_loss_value {phi_loss_value}')
-                print(f'psi_loss_value {psi_loss_value}')
-                print(f'task_w weights {task_w.weight}')
-                print(f'phi model {[param.data for param in phi_model.parameters()]}')
-                print(f'task_w {task_w(phis)}')
-                print(f'phis {phis}')
+        if (torch.isnan(loss) or torch.isinf(loss)):
+            print(f'loss {loss}')
+            print(f'phi_loss_value {phi_loss_value}')
+            print(f'psi_loss_value {psi_loss_value}')
+            print(f'task_w weights {task_w.weight}')
+            print(f'phi model {[param.data for param in phi_model.parameters()]}')
+            print(f'task_w {task_w(phis)}')
+            print(f'phis {phis}')
 
-            loss.backward(retain_graph=True)
-            
-            # Clamp weights between -1 and 1
-            #for param_dict in params:
-            #    for params in param_dict.get('params', []):
-            #        params.grad.data.clamp_(-1, 1)
+        loss.backward(retain_graph=True)
+        
+        # Clamp weights between -1 and 1
+        for param_dict in params:
+            for params in param_dict.get('params', []):
+                params.grad.data.clamp_(-1e10, 1e10)
 
-            optim.step()
+        optim.step()
 
-            # Finish train the SF network
-            # update the target SF network
-            self.updates_since_target_updated[policy_index] += 1
-            if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
-                update_models_weights(psi_model, target_psi_model)
-                # We don't need target phi model
-                # update_models_weights(phi_model, target_phi_model)
-                self.updates_since_target_updated[policy_index] = 0
+        with torch.no_grad():
+            for weight in loss_coefficient.parameters():
+                weight.data = torch.abs(weight.data)
+
+        # Finish train the SF network
+        # update the target SF network
+        self.updates_since_target_updated[policy_index] += 1
+        if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
+            update_models_weights(psi_model, target_psi_model)
+            # We don't need target phi model
+            # update_models_weights(phi_model, target_phi_model)
+            self.updates_since_target_updated[policy_index] = 0
+
+        return loss, psi_loss_value, phi_loss_value, loss_coefficient
 
     def GPI_w(self, state, w):
         """

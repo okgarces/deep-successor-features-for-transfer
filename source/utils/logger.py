@@ -49,6 +49,24 @@ class LoggerBase(object):
     def log_accumulative_reward(self, progress, training_steps):
         self.log_scalar(f'Accumulative_Reward/timesteps', progress, training_steps)
 
+    def log_phi_loss(self, progress, training_steps):
+        self.log_scalar(f'Losses/Phi_Loss/timesteps', progress, training_steps)
+
+    def log_psi_loss(self, progress, training_steps):
+        self.log_scalar(f'Losses/Psi_Loss/timesteps', progress, training_steps)
+
+    def log_total_loss(self, progress, training_steps):
+        self.log_scalar(f'Losses/Total_Loss/timesteps', progress, training_steps)
+
+    def log_loss_coefficient(self, progress, training_steps):
+        self.log_scalar(f'Losses/Coefficients/timesteps', progress, training_steps)
+
+    def log_losses(self, total_loss, psi_loss, phi_loss, loss_coefficient, training_steps):
+        self.log_phi_loss(phi_loss, training_steps)
+        self.log_psi_loss(psi_loss, training_steps)
+        self.log_total_loss(total_loss, training_steps)
+        self.log_loss_coefficient(loss_coefficient, training_steps)
+
     def finalize(self):
         raise NotImplemented()
 

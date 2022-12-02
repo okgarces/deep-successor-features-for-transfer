@@ -43,6 +43,7 @@ class SFDQN_PHI(Agent):
         self.phi: Tuple[ModelTuple, ModelTuple]
         self.test_tasks_weights = []
         self.buffers = []
+        self.loss_coefficients = []
 
     def set_active_training_task(self, index):
         """
@@ -65,13 +66,16 @@ class SFDQN_PHI(Agent):
 
         # Set buffer to current task buffer
         self.buffer = self.buffers[index]
+        self.loss_coefficient = self.loss_coefficients[index]
         
     def get_Q_values(self, s, s_enc):
-        q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
-        if not self.use_gpi:
-            c = self.task_index
-        self.c = c
-        return q[:, c,:]
+        # Only track gradients when updating
+        with torch.no_grad():
+            q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
+            if not self.use_gpi:
+                c = self.task_index
+            self.c = c
+            return q[:, c,:]
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         # update w
@@ -100,7 +104,11 @@ class SFDQN_PHI(Agent):
             for index in range(self.n_tasks):
                 transitions = self.buffers[index].replay()
                 # Update successor using transitions per source task and GPI to update successor
-                self.sf.update_successor(transitions, self.phi, index, True)
+                losses = self.sf.update_successor(transitions, self.phi, index, self.loss_coefficient, True)
+
+                if isinstance(losses, tuple):
+                    total_loss, psi_loss, phi_loss, loss_coefficient = losses
+                    self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), loss_coefficient.weight.item(), self.total_training_steps)
 
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -130,6 +138,9 @@ class SFDQN_PHI(Agent):
             self.phi = self.init_phi_model()
         self.sf.add_training_task(task, source=None)
         self.buffers.append(self.replay_buffer_handle())
+
+        # Coefficients
+        self.loss_coefficients.append(torch.nn.Linear(1, 1, bias=False))
 
     ############# phi Model Learning ####################
     def init_phi_model(self):
@@ -199,13 +210,15 @@ class SFDQN_PHI(Agent):
         return return_data
     
     def get_test_action(self, s_enc, w):
-        if random.random() <= self.test_epsilon:
-            a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
-        else:
-            q, c = self.sf.GPI_w(s_enc, w)
-            q = q[:, c,:]
-            a = torch.argmax(q)
-        return a
+        # Only track gradients when updating
+        with torch.no_grad():
+            if random.random() <= self.test_epsilon:
+                a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
+            else:
+                q, c = self.sf.GPI_w(s_enc, w)
+                q = q[:, c,:]
+                a = torch.argmax(q)
+            return a
             
     def test_agent(self, task, test_index):
         R = 0.0
@@ -241,16 +254,16 @@ class SFDQN_PHI(Agent):
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
-        phi = phi_model(input_phi).detach()
-
         optim = torch.optim.SGD(w_approx.parameters(), lr=1e-4, weight_decay=1e-3)
         loss_task = torch.nn.MSELoss()
 
-        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().to(self.device)
+        # No track gradients
+        with torch.no_grad():
+            input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
+            phi = phi_model(input_phi).detach()
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         r_fit = w_approx(phi)
-
         optim.zero_grad()
         loss = loss_task(r_fit, r_tensor)
 
@@ -260,11 +273,15 @@ class SFDQN_PHI(Agent):
                 print(f'loss target task {loss}')
                 print(f'task_w weights target {w_approx.weight}')
                 print(f'phi model in target {[param.data for param in phi_model.parameters()]}')
-                print(f'phis in targte reward mapper {phi}')
+                print(f'phis in target reward mapper {phi}')
 
             loss.backward()
+
+            for param in w_approx.parameters():
+                param.grad.data.clamp_(-1e10, 1e10)
+
             optim.step()
-        # If inf loss
+
         return loss
     
     def get_progress_dict(self):
