@@ -198,15 +198,15 @@ class DeepSF_PHI(SF):
                 {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
                 {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
                 {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
-                {'params': loss_coefficient.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 }
+                # {'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
         ]
 
-        phi_loss_value = phi_loss(r_fit, rs).unsqueeze(0)
+        phi_loss_value = phi_loss(r_fit, rs)
         optim = torch.optim.Adam(params)
         optim.zero_grad()
 
-        psi_loss_value = psi_loss(current_psi, merge_current_target_psi).unsqueeze(0)
-        loss = phi_loss_value + loss_coefficient(psi_loss_value)
+        psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
+        loss = phi_loss_value + (loss_coefficient * psi_loss_value)
 
         # This is only to avoid gradient exploiding or vanishing. While we 
         # find a specific lr and wd
@@ -229,8 +229,7 @@ class DeepSF_PHI(SF):
         optim.step()
 
         with torch.no_grad():
-            for weight in loss_coefficient.parameters():
-                weight.data = torch.abs(weight.data)
+            loss_coefficient.data = torch.abs(loss_coefficient.data)
 
         # Finish train the SF network
         # update the target SF network

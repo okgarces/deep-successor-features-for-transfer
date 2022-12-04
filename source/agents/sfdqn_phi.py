@@ -106,7 +106,7 @@ class SFDQN_PHI(Agent):
 
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss, loss_coefficient = losses
-                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), loss_coefficient.weight.item(), self.total_training_steps)
+                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), loss_coefficient.item(), self.total_training_steps)
 
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -138,7 +138,7 @@ class SFDQN_PHI(Agent):
         self.buffers.append(self.replay_buffer_handle())
 
         # Coefficients
-        self.loss_coefficients.append(torch.nn.Linear(1, 1, bias=False).to(self.device))
+        self.loss_coefficients.append(torch.ones(1, requires_grad=True).to(self.device))
 
     ############# phi Model Learning ####################
     def init_phi_model(self):
