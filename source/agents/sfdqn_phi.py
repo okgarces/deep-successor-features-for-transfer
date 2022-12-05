@@ -154,7 +154,7 @@ class SFDQN_PHI(Agent):
 
         weights = torch.ones(2, requires_grad=True).to(self.device)
         with torch.no_grad():
-            coefficient_model.weight = torch.nn.Parameter(weights)
+            coefficient_model.weight.data = torch.abs(weights / weights.sum())
 
         return coefficient_model
 
@@ -261,7 +261,7 @@ class SFDQN_PHI(Agent):
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-4)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-3, weight_decay=1e-3)
         loss_task = torch.nn.MSELoss()
 
         # No track gradients
