@@ -195,18 +195,25 @@ class DeepSF_PHI(SF):
         #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         # ]
         params = [
-                {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
-                {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
-                # {'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
+                {'params': psi_model.parameters(), 'lr': 1e-3 },
+                {'params': phi_model.parameters(), 'lr': 1e-3},
+                {'params': task_w.parameters(), 'lr': 1e-3},
+                {'params': loss_coefficient.parameters(), 'lr': 1e-3}
+                # {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
+                # {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
+                # {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
+                #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
         ]
 
-        phi_loss_value = phi_loss(r_fit, rs)
+        phi_loss_value = phi_loss(r_fit, rs).unsqueeze(0)
         optim = torch.optim.Adam(params)
         optim.zero_grad()
 
-        psi_loss_value = psi_loss(current_psi, merge_current_target_psi)
-        loss = phi_loss_value + (loss_coefficient * psi_loss_value)
+        psi_loss_value = psi_loss(current_psi, merge_current_target_psi).unsqueeze(0)
+
+        input_loss = torch.concat([phi_loss_value, psi_loss_value]).flatten()
+        loss = loss_coefficient(input_loss)
+        #loss = phi_loss_value + (loss_coefficient * psi_loss_value)
 
         # This is only to avoid gradient exploiding or vanishing. While we 
         # find a specific lr and wd
@@ -220,16 +227,17 @@ class DeepSF_PHI(SF):
             print(f'phis {phis}')
 
         loss.backward(retain_graph=True)
-        
-        # Clamp weights between -1 and 1
+
+        # Clamp weights between
         for param_dict in params:
             for params in param_dict.get('params', []):
                 params.grad.data.clamp_(-1e10, 1e10)
-
+        
         optim.step()
 
         with torch.no_grad():
-            loss_coefficient.data = torch.abs(loss_coefficient.data)
+            #loss_coefficient.weight.data = torch.abs(loss_coefficient.weight.data)
+            loss_coefficient.weight.data = torch.abs(loss_coefficient.weight.data / loss_coefficient.weight.data.sum())
 
         # Finish train the SF network
         # update the target SF network

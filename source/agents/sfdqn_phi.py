@@ -106,7 +106,7 @@ class SFDQN_PHI(Agent):
 
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss, loss_coefficient = losses
-                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), loss_coefficient.item(), self.total_training_steps)
+                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), loss_coefficient.weight, self.total_training_steps)
 
     def reset(self):
         super(SFDQN_PHI, self).reset()
@@ -138,7 +138,7 @@ class SFDQN_PHI(Agent):
         self.buffers.append(self.replay_buffer_handle())
 
         # Coefficients
-        self.loss_coefficients.append(torch.ones(1, requires_grad=True).to(self.device))
+        self.loss_coefficients.append(self.init_loss_coefficients())
 
     ############# phi Model Learning ####################
     def init_phi_model(self):
@@ -148,6 +148,15 @@ class SFDQN_PHI(Agent):
         update_models_weights(phi_model, phi_target_model)
         # TODO This variable could be removed
         return (phi_model, phi_loss, phi_optim), (phi_target_model, phi_target_loss, phi_target_optim)
+
+    def init_loss_coefficients(self):
+        coefficient_model = torch.nn.Linear(2, 1, bias=False, device=self.device)
+
+        weights = torch.ones(2, requires_grad=True).to(self.device)
+        with torch.no_grad():
+            coefficient_model.weight = torch.nn.Parameter(weights)
+
+        return coefficient_model
 
     ############## Progress and Stats ###################
     
@@ -252,7 +261,7 @@ class SFDQN_PHI(Agent):
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-4, weight_decay=1e-3)
+        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-4)
         loss_task = torch.nn.MSELoss()
 
         # No track gradients
