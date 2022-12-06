@@ -63,7 +63,7 @@ class LoggerBase(object):
             self.log_scalar(f'Losses/Coefficients_L1/timesteps', progress[0], training_steps)
             self.log_scalar(f'Losses/Coefficients_L2/timesteps', progress[1], training_steps)
         else:
-            self.log_scalar(f'Losses/Coefficients/timesteps', progress, training_steps)
+            self.log_scalar(f'Losses/Coefficients/timesteps', progress[0], training_steps)
 
     def log_losses(self, total_loss, psi_loss, phi_loss, loss_coefficient, training_steps):
         self.log_phi_loss(phi_loss, training_steps)
