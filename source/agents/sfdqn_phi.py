@@ -158,7 +158,8 @@ class SFDQN_PHI(Agent):
 
         #return coefficient_model
 
-        weights = torch.ones(1, requires_grad=True).to(self.device)
+        # .to(self.device) and device=self.device, are different. The latter creates the tensor in GPU.
+        weights = torch.ones(1, requires_grad=True, device=self.device)
         return weights
 
     ############## Progress and Stats ###################
