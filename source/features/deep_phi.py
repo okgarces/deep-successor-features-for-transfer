@@ -198,6 +198,7 @@ class DeepSF_PHI(SF):
                 {'params': psi_model.parameters(), 'lr': 1e-3 },
                 {'params': phi_model.parameters(), 'lr': 1e-3},
                 {'params': task_w.parameters(), 'lr': 1e-3},
+                {'params': loss_coefficient, 'lr': 1e-2}
                 #{'params': loss_coefficient.parameters(), 'lr': 1e-2}
                 # {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
                 # {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
@@ -213,7 +214,7 @@ class DeepSF_PHI(SF):
 
         #input_loss = torch.concat([phi_loss_value, psi_loss_value]).flatten()
         #loss = loss_coefficient(input_loss)
-        loss = phi_loss_value + (loss_coefficient * psi_loss_value)
+        loss = (phi_loss_value / loss_coefficient) + (loss_coefficient * psi_loss_value)
         # loss = phi_loss_value + (loss_coefficient(psi_loss_value))
 
         # This is only to avoid gradient exploiding or vanishing. While we 
