@@ -195,15 +195,15 @@ class DeepSF_PHI(SF):
         #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         # ]
         params = [
-                {'params': psi_model.parameters(), 'lr': 1e-3 },
-                {'params': phi_model.parameters(), 'lr': 1e-3},
-                {'params': task_w.parameters(), 'lr': 1e-3},
-                {'params': loss_coefficient, 'lr': 1e-2}
+                #{'params': psi_model.parameters(), 'lr': 1e-3 },
+                #{'params': phi_model.parameters(), 'lr': 1e-3},
+                #{'params': task_w.parameters(), 'lr': 1e-3},
                 #{'params': loss_coefficient.parameters(), 'lr': 1e-2}
-                # {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-2 },
-                # {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
-                # {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-3 },
+                {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-4 },
+                {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
+                {'params': loss_coefficient, 'lr': 1e-3 },
         ]
 
         phi_loss_value = phi_loss(r_fit, rs).unsqueeze(0)
@@ -214,7 +214,7 @@ class DeepSF_PHI(SF):
 
         #input_loss = torch.concat([phi_loss_value, psi_loss_value]).flatten()
         #loss = loss_coefficient(input_loss)
-        loss = (phi_loss_value / loss_coefficient) + (loss_coefficient * psi_loss_value)
+        loss = (phi_loss_value) + (loss_coefficient * psi_loss_value)
         # loss = phi_loss_value + (loss_coefficient(psi_loss_value))
 
         # This is only to avoid gradient exploiding or vanishing. While we 
@@ -237,16 +237,8 @@ class DeepSF_PHI(SF):
         
         optim.step()
 
-        #with torch.no_grad():
-        #    #loss_coefficient.weight.data = torch.abs(loss_coefficient.weight.data)
-        #    abs_weights = torch.abs(loss_coefficient.weight.data)
-        #    loss_coefficient.weight.data = abs_weights
-            #loss_coefficient.weight.data = abs_weights / abs_weights.sum()
-
-        # Fit coefficient
-        #min_value = torch.min(phi_loss_value, psi_loss_value)
-        #max_value = torch.max(phi_loss_value, psi_loss_value)
-        #loss_coefficient = loss_coefficient + 0.5 * (max_value - min_value) / max_value
+        with torch.no_grad():
+            loss_coefficient.data.clamp_(1e-2, 1e3)
 
         # Finish train the SF network
         # update the target SF network
