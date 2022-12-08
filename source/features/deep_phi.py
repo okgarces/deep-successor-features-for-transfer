@@ -214,7 +214,7 @@ class DeepSF_PHI(SF):
 
         #input_loss = torch.concat([phi_loss_value, psi_loss_value]).flatten()
         #loss = loss_coefficient(input_loss)
-        loss = (phi_loss_value) + (loss_coefficient * psi_loss_value)
+        loss = ((1 - loss_coefficient) * phi_loss_value) + (loss_coefficient * psi_loss_value)
         # loss = phi_loss_value + (loss_coefficient(psi_loss_value))
 
         # This is only to avoid gradient exploiding or vanishing. While we 
@@ -228,17 +228,17 @@ class DeepSF_PHI(SF):
             print(f'task_w {task_w(phis)}')
             print(f'phis {phis}')
 
-        loss.backward(retain_graph=True)
+        loss.backward()
 
         # Clamp weights between
-        for param_dict in params:
-            for params in param_dict.get('params', []):
-                params.grad.data.clamp_(-1e10, 1e10)
+        #for param_dict in params:
+        #    for params in param_dict.get('params', []):
+        #        params.grad.data.clamp_(-1e10, 1e10)
         
         optim.step()
 
         with torch.no_grad():
-            loss_coefficient.data.clamp_(1e-2, 1e3)
+            loss_coefficient.data.clamp_(1e-4, 1)
 
         # Finish train the SF network
         # update the target SF network

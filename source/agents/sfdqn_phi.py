@@ -265,8 +265,8 @@ class SFDQN_PHI(Agent):
         phi_tuple, *_ = self.phi
         phi_model, *_ = phi_tuple
 
-        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-3, weight_decay=1e-4)
-        #optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3)
+        #optim = torch.optim.SGD(w_approx.parameters(), lr=1e-3, weight_decay=1e-4)
+        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-4)
         loss_task = torch.nn.MSELoss()
 
         # No track gradients
@@ -289,8 +289,8 @@ class SFDQN_PHI(Agent):
 
             loss.backward()
 
-            for param in w_approx.parameters():
-                param.grad.data.clamp_(-1e10, 1e10)
+            #for param in w_approx.parameters():
+            #    param.grad.data.clamp_(-1e10, 1e10)
 
             optim.step()
 
