@@ -170,7 +170,6 @@ class DeepSF_PHI(SF):
         target_psi_model, *_ = target_psi_tuple
 
         current_psi = psi_model(states)
-        # We don't need target_psi gradients
         targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
 
         # for param in task_w.parameters():

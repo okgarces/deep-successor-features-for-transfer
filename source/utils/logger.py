@@ -35,8 +35,17 @@ class LoggerBase(object):
 
     def log_target_error_progress(self, progress):
         task_id = progress.get('task') + 1
-        self.log_scalar(f'Target_Tasks/W_Error/Ev_Steps/task_{task_id}', progress.get('w_error'), progress.get('steps'))
-        self.log_scalar(f'Target_Tasks/Rewards/Ev_Steps/task_{task_id}', progress.get('reward'), progress.get('steps'))
+        steps = progress.get('steps')
+        self.log_scalar(f'Target_Tasks/W_Error/Ev_Steps/task_{task_id}', progress.get('w_error'), steps)
+        self.log_scalar(f'Target_Tasks/Rewards/Ev_Steps/task_{task_id}', progress.get('reward'), steps)
+
+        target_phi_loss = progress.get('phi_loss')
+        target_psi_loss = progress.get('psi_loss')
+
+        if target_phi_loss is not None or target_psi_loss is not None:
+            self.log_scalar(f'Target_Tasks/Phi_Loss/Ev_Steps/task_{task_id}', target_phi_loss, steps)
+            self.log_scalar(f'Target_Tasks/Psi_Loss/Ev_Steps/task_{task_id}', target_psi_loss, steps)
+
 
     def log_tasks_performance(self, performances):
         for task, performance in enumerate(performances):
