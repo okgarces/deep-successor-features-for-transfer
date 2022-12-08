@@ -202,7 +202,7 @@ class TSFDQN_PHI(Agent):
             q1, _ = self.sf.GPI(next_states, policy_index)
             next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
         else:
-            sf = self.get_successor(next_states, policy_index)
+            sf = self.sf.get_successor(next_states, policy_index)
             q1 = task_w(sf)
             # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
             next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
