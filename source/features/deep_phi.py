@@ -237,7 +237,7 @@ class DeepSF_PHI(SF):
         optim.step()
 
         with torch.no_grad():
-            loss_coefficient.data.clamp_(1e-4, 1)
+            loss_coefficient.data.clamp_(1e-6, 9e-1)
 
         # Finish train the SF network
         # update the target SF network
