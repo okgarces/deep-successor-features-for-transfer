@@ -146,7 +146,7 @@ class DeepSF_PHI(SF):
         task_w = self.fit_w[policy_index]
 
         # Concat axis = 1 to concat per each batch
-        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1).detach()
+        input_phi = torch.concat([states.to(self.device), actions.reshape((n_batch, 1)).to(self.device), next_states.to(self.device)], axis=1)
         phis = phi_model(input_phi)
 
         # next actions come from current Successor Feature
@@ -171,7 +171,7 @@ class DeepSF_PHI(SF):
 
         current_psi = psi_model(states)
         # We don't need target_psi gradients
-        targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:].detach()
+        targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
 
         # for param in task_w.parameters():
         #     param.requires_grad = False
