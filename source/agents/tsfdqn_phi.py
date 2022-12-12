@@ -232,7 +232,7 @@ class TSFDQN_PHI(Agent):
                 {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
-                {'params': loss_coefficient, 'lr': 1e-3 },
+                #{'params': loss_coefficient, 'lr': 1e-3 },
         ]
 
         #current_psi_clone = current_psi
@@ -244,7 +244,7 @@ class TSFDQN_PHI(Agent):
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi).unsqueeze(0)
-        loss = (1 - loss_coefficient) * phi_loss_value + loss_coefficient * psi_loss_value
+        loss = phi_loss_value + loss_coefficient * psi_loss_value
 
         # This is only to avoid gradient exploiding or vanishing. While we 
         # find a specific lr and wd
@@ -421,24 +421,24 @@ class TSFDQN_PHI(Agent):
         return R
 
     def update_target_models(self, w_approx, r, s_enc, a, s1_enc):
-        with torch.no_grad():
-            input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
-            phi = self.compute_target_phi(input_phi)
-            psi = self.sf.get_successors(s_enc)
-            next_psi = self.sf.get_next_successors(s1_enc)
+        #with torch.no_grad():
+        input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
+        phi = self.compute_target_phi(input_phi)
+        psi = self.sf.get_successors(s_enc)
+        next_psi = self.sf.get_next_successors(s1_enc)
 
         parameters = list(w_approx.parameters()) + list(self.omegas.parameters())
         optim = torch.optim.Adam(parameters, lr=1e-3, weight_decay=1e-4)
         loss_task = torch.nn.MSELoss()
 
-        with torch.no_grad():
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        #with torch.no_grad():
+        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-            t_s_values = []
-            t_s1_values = []
-            for g_function in self.g_functions:
-                t_s_values.append(g_function(s_enc))
-                t_s1_values.append(g_function(s1_enc))
+        t_s_values = []
+        t_s1_values = []
+        for g_function in self.g_functions:
+            t_s_values.append(g_function(s_enc))
+            t_s1_values.append(g_function(s1_enc))
 
         s_transformed = self.omegas(torch.concat(t_s_values).flatten())
         s1_transformed = self.omegas(torch.concat(t_s1_values).flatten())
