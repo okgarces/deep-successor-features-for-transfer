@@ -271,10 +271,10 @@ class SFDQN_PHI(Agent):
         loss_task = torch.nn.MSELoss()
 
         # No track gradients
-        with torch.no_grad():
-            input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
-            phi = phi_model(input_phi)
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        #with torch.no_grad():
+        input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
+        phi = phi_model(input_phi)
+        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         r_fit = w_approx(phi)
         optim.zero_grad()
