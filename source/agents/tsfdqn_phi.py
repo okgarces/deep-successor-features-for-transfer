@@ -258,11 +258,13 @@ class TSFDQN_PHI(Agent):
             print(f'phis {phis}')
 
         loss.backward()
+
+        for param_dict in parameters:
+            for params in param_dict.get('params', []):
+                params.grad.data.clamp_(-1, 1)
+
         optim.step()
 
-        with torch.no_grad():
-            # Loss coefficient between these to provide a margin of improvment
-            loss_coefficient.data.clamp_(1e-6, 9e-1)
 
         # Finish train the SF network
         # update the target SF network
@@ -467,6 +469,9 @@ class TSFDQN_PHI(Agent):
             print(f'h_transformed weights {self.h_function.weight}')
             print(f'g_transformed weights {self.g_function.weight}')
             print(f'task_w {w_approx}')
+
+        for params in parameters:
+            params.grad.data.clamp_(-1, 1)
 
         optim.step()
 

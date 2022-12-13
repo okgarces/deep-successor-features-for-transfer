@@ -290,8 +290,9 @@ class SFDQN_PHI(Agent):
 
             loss.backward()
 
-            #for param in w_approx.parameters():
-            #    param.grad.data.clamp_(-1e10, 1e10)
+            # TODO Hyperparameter gradient clipping
+            for param in w_approx.parameters():
+                param.grad.data.clamp_(-1, 1)
 
             optim.step()
 
