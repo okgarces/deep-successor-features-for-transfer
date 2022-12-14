@@ -41,10 +41,12 @@ class LoggerBase(object):
 
         target_phi_loss = progress.get('phi_loss')
         target_psi_loss = progress.get('psi_loss')
+        target_loss_coefficient = progress.get('target_loss_coefficient')
 
-        if target_phi_loss is not None or target_psi_loss is not None:
+        if target_phi_loss is not None or target_psi_loss is not None or target_loss_coefficient is not None:
             self.log_scalar(f'Target_Tasks/Phi_Loss/Ev_Steps/task_{task_id}', target_phi_loss, steps)
             self.log_scalar(f'Target_Tasks/Psi_Loss/Ev_Steps/task_{task_id}', target_psi_loss, steps)
+            self.log_scalar(f'Target_Tasks/Losses/Coefficients/Ev_Steps/task_{task_id}', target_loss_coefficient, steps)
 
 
     def log_tasks_performance(self, performances):

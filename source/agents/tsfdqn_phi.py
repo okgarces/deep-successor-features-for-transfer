@@ -45,6 +45,7 @@ class TSFDQN_PHI(Agent):
         self.test_tasks_weights = []
         self.buffers = []
         self.loss_coefficients = []
+        self.target_loss_coefficients = []
 
         # TSF
         self.g_functions = []
@@ -222,17 +223,18 @@ class TSFDQN_PHI(Agent):
         # Only one phi vector with a weight_decay to learn smooth functions
         # psi_optim.zero_grad()
         parameters = [
-                #{'params': psi_model.parameters(), 'lr': 1e-3 },
-                #{'params': phi_model.parameters(), 'lr': 1e-3},
-                #{'params': task_w.parameters(), 'lr': 1e-3},
-                #{'params': loss_coefficient.parameters(), 'lr': 1e-2}
-                {'params': self.h_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
-                {'params': self.g_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
-                {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-4 },
-                {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                {'params': self.h_function.parameters(), 'lr': 1e-3},
+                {'params': self.g_function.parameters(), 'lr': 1e-3},
+                {'params': psi_model.parameters(), 'lr': 1e-3},
+                {'params': phi_model.parameters(), 'lr': 1e-3},
+                {'params': task_w.parameters(), 'lr': 1e-3},
+                #{'params': self.h_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': self.g_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-4 },
+                #{'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
-                #{'params': loss_coefficient, 'lr': 1e-3 },
+                {'params': loss_coefficient, 'lr': 1e-3},
         ]
 
         #current_psi_clone = current_psi
@@ -280,7 +282,7 @@ class TSFDQN_PHI(Agent):
 
     ############## Progress and Stats ###################
 
-    def get_target_reward_mapper_error(self, r, loss, psi_loss, phi_loss, task, ts):
+    def get_target_reward_mapper_error(self, r, loss, psi_loss, phi_loss, task, target_loss_coefficient, ts):
         return_dict = {
             'task': task,
             # Total steps and ev_frequency
@@ -288,7 +290,8 @@ class TSFDQN_PHI(Agent):
             'steps': ((500 * (self.total_training_steps // 1000)) + ts),
             'w_error': loss,
             'psi_loss': psi_loss,
-            'phi_loss': phi_loss
+            'phi_loss': phi_loss,
+            'target_loss_coefficient': target_loss_coefficient
             }
         return return_dict
     
@@ -340,10 +343,8 @@ class TSFDQN_PHI(Agent):
             with torch.no_grad():
                 w_approx.weight = torch.nn.Parameter(fit_w)
 
-            #fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
-            #w_approx = fit_w
-
             self.test_tasks_weights.append(w_approx)
+            self.target_loss_coefficients.append(self.init_loss_coefficients())
 
         # train each one
         return_data = []
@@ -391,6 +392,7 @@ class TSFDQN_PHI(Agent):
     def test_agent(self, task, test_index):
         R = 0.0
         w = self.test_tasks_weights[test_index]
+        target_loss_coefficient = self.target_loss_coefficients[test_index]
         s = task.initialize()
         s_enc = self.encoding(s)
 
@@ -404,7 +406,7 @@ class TSFDQN_PHI(Agent):
             s1_enc = self.encoding(s1)
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss, psi_loss, phi_loss = self.update_target_models(w, r, s_enc, a, s1_enc)
+            loss, psi_loss, phi_loss = self.update_target_models(w, target_loss_coefficient, r, s_enc, a, s1_enc)
             total_loss += loss
             total_phi_loss += phi_loss
             total_psi_loss += psi_loss
@@ -418,47 +420,62 @@ class TSFDQN_PHI(Agent):
                 break
 
         # Log accum loss for T
-        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, total_loss, total_psi_loss, total_phi_loss, test_index, self.T))
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, total_loss, total_psi_loss, total_phi_loss, test_index, target_loss_coefficient.item() ,self.T))
 
         return R
 
-    def update_target_models(self, w_approx, r, s_enc, a, s1_enc):
+    def update_target_models(self, w_approx, target_loss_coefficient, r, s_enc, a, s1_enc):
         #with torch.no_grad():
         input_phi = torch.concat([s_enc.flatten().to(self.device), a.flatten().to(self.device), s1_enc.flatten().to(self.device)]).to(self.device)
         phi = self.compute_target_phi(input_phi)
         psi = self.sf.get_successors(s_enc)
         next_psi = self.sf.get_next_successors(s1_enc)
 
-        parameters = list(w_approx.parameters()) + list(self.omegas.parameters())
-        optim = torch.optim.Adam(parameters, lr=1e-3, weight_decay=1e-4)
+        parameters = [
+                {'params': w_approx.parameters()},
+                {'params': self.omegas.parameters()},
+                #{'params': loss_coefficient.parameters(), 'lr': 1e-2}
+                #{'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-4 },
+                #{'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
+                {'params': target_loss_coefficient},
+        ]
+        #optim = torch.optim.Adam(parameters, lr=1e-3, weight_decay=1e-4)
+        optim = torch.optim.Adam(parameters, lr=1e-3)
         loss_task = torch.nn.MSELoss()
 
-        #with torch.no_grad():
-        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-        t_s_values = []
-        t_s1_values = []
-        for g_function in self.g_functions:
-            t_s_values.append(g_function(s_enc))
-            t_s1_values.append(g_function(s1_enc))
+            t_s_values = []
+            t_s1_values = []
+            for g_function in self.g_functions:
+                t_s_values.append(g_function(s_enc))
+                t_s1_values.append(g_function(s1_enc))
 
         s_transformed = self.omegas(torch.concat(t_s_values).flatten())
         s1_transformed = self.omegas(torch.concat(t_s1_values).flatten())
 
         transformed_phi = phi * (self.h_function(s_transformed) + self.h_function(s1_transformed))
-        r_fit_transfer = w_approx(transformed_phi)
 
+        with torch.no_grad():
         # 1.0 is the gamma
-        psi_flatten = psi.swapaxes(1,2).flatten(start_dim=2)
-        next_psi_flatten = next_psi.swapaxes(1,2).flatten(start_dim=2)
+            psi_flatten = psi.swapaxes(1,2).flatten(start_dim=2)
+            next_psi_flatten = next_psi.swapaxes(1,2).flatten(start_dim=2)
+
         transformed_psi = self.omegas(psi_flatten)
         transformed_next_psi = transformed_phi + 1.0 * self.omegas(next_psi_flatten)
 
+        r_fit_transfer = w_approx(transformed_phi)
+
         optim.zero_grad()
         # TODO psi loss missing
+
         phi_loss = loss_task(r_fit_transfer, r_tensor)
         psi_loss = loss_task(transformed_psi, transformed_next_psi)
-        loss =  phi_loss + psi_loss
+
+        loss =  phi_loss + (target_loss_coefficient * psi_loss)
         # Otherwise gradients will be computed to inf or nan.
         loss.backward()
 
@@ -470,10 +487,16 @@ class TSFDQN_PHI(Agent):
             print(f'g_transformed weights {self.g_function.weight}')
             print(f'task_w {w_approx}')
 
-        for params in parameters:
-            params.grad.data.clamp_(-1, 1)
+        for param_dict in parameters:
+            for params in param_dict.get('params', []):
+                params.grad.data.clamp_(-1e10, 1e10)
 
         optim.step()
+
+        with torch.no_grad():
+            max_coefficient = 1e6
+            min_coefficient = 1e-2
+            target_loss_coefficient.data.clamp_(min_coefficient, max_coefficient)
 
         # If inf loss
         return loss, psi_loss, phi_loss

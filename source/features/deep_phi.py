@@ -89,44 +89,7 @@ class DeepSF_PHI(SF):
         return torch.stack(predictions, axis=1).to(self.device)
     
     def update_reward(self, phi: torch.Tensor, r: torch.Tensor, task_index: int, exact=False) -> None:
-        """
-        Updates the reward parameters for the given task based on the observed reward sample
-        from the environment. 
-        
-        Parameters
-        ----------
-        phi : torch.Tensor 
-            the state features
-        r : torch.TensorFloat | torch.Tensor
-            the observed reward from the MDP
-        task_index : integer
-            the index of the task from which this reward was sampled
-        exact : boolean
-            if True, validates the true reward from the environment and the linear representation
-        """
-        
-        # update reward using linear regression
-        w = self.fit_w[task_index]
-        loss = torch.nn.MSELoss()
-        optim = torch.optim.SGD(w.parameters(), lr=0.005, weight_decay=0.01)
-        r_tensor = torch.tensor(r).float().unsqueeze(0).detach().requires_grad_(False).to(self.device)
-
-        optim.zero_grad()
-        l1 = loss(w(phi), r_tensor)
-        
-        # Otherwise gradients will be computed to inf or nan.
-        if True or not (torch.isnan(l1) or torch.isinf(l1)):
-            if (torch.isnan(l1) or torch.isinf(l1)):
-                print(f'loss target task {loss}')
-                print(f'task_w weights target {w.weight}')
-                print(f'phis in targte reward mapper {phi}')
-            l1.backward()
-
-            # Clamp weights between -1 and 1
-            #for params in w.parameters():
-            #    params.grad.data.clamp_(-1, 1)
-
-            optim.step()
+        raise Exception('This function should not be used')
 
     def update_successor(self, transitions, phis_model, policy_index, loss_coefficient, use_gpi):
 
@@ -194,15 +157,15 @@ class DeepSF_PHI(SF):
         #         {'params': task_w.parameters(), 'lr': 5e-3, 'weight_decay': 1e-3}
         # ]
         params = [
-                #{'params': psi_model.parameters(), 'lr': 1e-3 },
-                #{'params': phi_model.parameters(), 'lr': 1e-3},
-                #{'params': task_w.parameters(), 'lr': 1e-3},
+                {'params': psi_model.parameters(), 'lr': 1e-3},
+                {'params': phi_model.parameters(), 'lr': 1e-3},
+                {'params': task_w.parameters(), 'lr': 1e-3},
                 #{'params': loss_coefficient.parameters(), 'lr': 1e-2}
-                {'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-4 },
-                {'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': psi_model.parameters(), 'lr': 1e-3 , 'weight_decay': 1e-4 },
+                #{'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
+                #{'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
-                #{'params': loss_coefficient, 'lr': 1e-3 },
+                {'params': loss_coefficient, 'lr': 1e-3 },
         ]
 
         phi_loss_value = phi_loss(r_fit, rs).unsqueeze(0)
@@ -210,9 +173,6 @@ class DeepSF_PHI(SF):
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi).unsqueeze(0)
-
-        #max_coefficient = 1e4
-        #min_coefficient = 1e-6
 
         #input_loss = torch.concat([phi_loss_value, psi_loss_value]).flatten()
         #loss = loss_coefficient(input_loss)
@@ -236,12 +196,20 @@ class DeepSF_PHI(SF):
         # TODO Hyperparameter gradient clipping
         for param_dict in params:
             for params in param_dict.get('params', []):
-                params.grad.data.clamp_(-1, 1)
+                before = params.grad.data.clone()
+                params.grad.data.clamp_(-1e10, 1e10)
+                after = params.grad.data.clone()
+
+                if not torch.equal(before, after):
+                    print(f'This is the gradients before of {before} in Update Successor')
+                    print(f'This is the gradients after of {after} in Update Successor')
         
         optim.step()
 
-        #with torch.no_grad():
-        #    loss_coefficient.data.clamp_(min_coefficient, max_coefficient * .9)
+        with torch.no_grad():
+            max_coefficient = 1e6
+            min_coefficient = 1e-2
+            loss_coefficient.data.clamp_(min_coefficient, max_coefficient)
 
         # Finish train the SF network
         # update the target SF network

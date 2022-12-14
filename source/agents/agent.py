@@ -256,9 +256,9 @@ class Agent:
         if viewer is not None and self.episode % n_view_ev == 0:
             viewer.update()
         
-        # printing
-        if self.steps % self.print_ev == 0:
-            print('\t'.join(self.get_progress_strings()))
+        # Remove printing
+        #if self.steps % self.print_ev == 0:
+        #    print('\t'.join(self.get_progress_strings()))
     
     def train_on_task(self, train_task, n_samples, viewer=None, n_view_ev=None):
         """

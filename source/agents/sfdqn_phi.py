@@ -102,7 +102,7 @@ class SFDQN_PHI(Agent):
             # Update successor and phi
             transitions = self.buffer.replay()
             # Update successor using transitions per source task and GPI to update successor
-            losses = self.sf.update_successor(transitions, self.phi, self.task_index, self.loss_coefficient, False)
+            losses = self.sf.update_successor(transitions, self.phi, self.task_index, self.loss_coefficient, self.use_gpi)
 
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss, loss_coefficient = losses
@@ -266,35 +266,41 @@ class SFDQN_PHI(Agent):
         phi_model, *_ = phi_tuple
 
         #optim = torch.optim.SGD(w_approx.parameters(), lr=1e-3, weight_decay=1e-4)
-        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-4)
-        #optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3)
+        #optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-4)
+        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3)
         loss_task = torch.nn.MSELoss()
 
         # No track gradients
-        #with torch.no_grad():
-        input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
-        phi = phi_model(input_phi)
-        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
+            phi = phi_model(input_phi)
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         r_fit = w_approx(phi)
         optim.zero_grad()
         loss = loss_task(r_fit, r_tensor)
 
         # Otherwise gradients will be computed to inf or nan.
-        if True or not (torch.isnan(loss) or torch.isinf(loss)):
-            if (torch.isnan(loss) or torch.isinf(loss)):
-                print(f'loss target task {loss}')
-                print(f'task_w weights target {w_approx.weight}')
-                print(f'phi model in target {[param.data for param in phi_model.parameters()]}')
-                print(f'phis in target reward mapper {phi}')
+        #if True or not (torch.isnan(loss) or torch.isinf(loss)):
+        if (torch.isnan(loss) or torch.isinf(loss)):
+            print(f'loss target task {loss}')
+            print(f'task_w weights target {w_approx.weight}')
+            print(f'phi model in target {[param.data for param in phi_model.parameters()]}')
+            print(f'phis in target reward mapper {phi}')
 
-            loss.backward()
+        loss.backward()
 
-            # TODO Hyperparameter gradient clipping
-            for param in w_approx.parameters():
-                param.grad.data.clamp_(-1, 1)
+        # TODO Hyperparameter gradient clipping
+        for param in w_approx.parameters():
+            before = param.grad.data.clone()
+            param.grad.data.clamp_(-1e10, 1e10)
+            after = param.grad.data.clone()
 
-            optim.step()
+            if not torch.equal(before, after):
+                print(f'This is the gradients before of {before} in Target Reward Mapper')
+                print(f'This is the gradients after of {after} in Target Reward Mapper')
+
+        optim.step()
 
         return loss
     
