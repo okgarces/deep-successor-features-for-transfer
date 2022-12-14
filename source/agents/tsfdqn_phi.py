@@ -465,7 +465,7 @@ class TSFDQN_PHI(Agent):
             next_psi_flatten = next_psi.swapaxes(1,2).flatten(start_dim=2)
 
         transformed_psi = self.omegas(psi_flatten)
-        transformed_next_psi = transformed_phi + 1.0 * self.omegas(next_psi_flatten)
+        transformed_next_psi = transformed_phi + self.gamma * self.omegas(next_psi_flatten)
 
         r_fit_transfer = w_approx(transformed_phi)
 
