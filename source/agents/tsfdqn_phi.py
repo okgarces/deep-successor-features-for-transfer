@@ -49,6 +49,8 @@ class TSFDQN_PHI(Agent):
 
         # TSF
         self.g_functions = []
+        self.max_coefficient = 1e6
+        self.min_coefficient = 1e-2
 
     def set_active_training_task(self, index):
         """
@@ -266,6 +268,9 @@ class TSFDQN_PHI(Agent):
                 params.grad.data.clamp_(-1, 1)
 
         optim.step()
+
+        with torch.no_grad():
+            loss_coefficient.data.clamp_(self.min_coefficient, self.max_coefficient)
 
 
         # Finish train the SF network
@@ -494,9 +499,7 @@ class TSFDQN_PHI(Agent):
         optim.step()
 
         with torch.no_grad():
-            max_coefficient = 1e6
-            min_coefficient = 1e-2
-            target_loss_coefficient.data.clamp_(min_coefficient, max_coefficient)
+            target_loss_coefficient.data.clamp_(self.min_coefficient, self.max_coefficient)
 
         # If inf loss
         return loss, psi_loss, phi_loss
