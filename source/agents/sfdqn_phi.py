@@ -183,7 +183,7 @@ class SFDQN_PHI(Agent):
 
         for test_task in test_tasks:
             fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
-            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
+            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=True, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
 
             with torch.no_grad():
@@ -271,10 +271,10 @@ class SFDQN_PHI(Agent):
         loss_task = torch.nn.MSELoss()
 
         # No track gradients
-        with torch.no_grad():
-            input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
-            phi = phi_model(input_phi)
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        #with torch.no_grad():
+        input_phi = torch.concat([s_enc.flatten(), a.flatten(), s1_enc.flatten()]).to(self.device)
+        phi = phi_model(input_phi)
+        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         r_fit = w_approx(phi)
         optim.zero_grad()

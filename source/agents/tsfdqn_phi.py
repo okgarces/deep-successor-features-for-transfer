@@ -10,6 +10,8 @@ from utils.torch import get_torch_device
 from utils.types import ModelTuple
 from utils.torch import update_models_weights
 
+torch.autograd.set_detect_anomaly(True)
+
 
 class TSFDQN_PHI(Agent):
 
@@ -145,15 +147,16 @@ class TSFDQN_PHI(Agent):
 
     def init_omegas(self, n_features, n_tasks):
         # This is to approaxh weighted norm for linear
-        omegas = torch.nn.utils.weight_norm(torch.nn.Linear(n_features * n_tasks, n_features, bias=False, device=self.device))
+        # TODO Is this sufficient for \sum_i = 1?
+        omegas = torch.nn.Linear(n_features * n_tasks, n_features, bias=True, device=self.device)
         return omegas
 
     def init_h_function(self, n_features):
-        g_function = torch.nn.Linear(n_features, n_features, bias=False, device=self.device)
+        g_function = torch.nn.Linear(n_features, n_features, device=self.device)
         return g_function
 
     def init_g_function(self, n_features, s_enc_dim):
-        g_function = torch.nn.Linear(s_enc_dim, n_features, bias=False, device=self.device)
+        g_function = torch.nn.Linear(s_enc_dim, n_features, device=self.device)
         return g_function
 
     def init_phi_model(self):
@@ -175,7 +178,6 @@ class TSFDQN_PHI(Agent):
         return phi_model(phi_input) 
 
     def update_deep_models(self, transitions, phis_model, policy_index, loss_coefficient, use_gpi):
-        torch.autograd.set_detect_anomaly(True)
 
         if transitions is None:
             return
@@ -236,7 +238,7 @@ class TSFDQN_PHI(Agent):
                 #{'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
-                {'params': loss_coefficient, 'lr': 1e-3},
+                {'params': loss_coefficient, 'lr': 1e-3, 'maximize': True },
         ]
 
         #current_psi_clone = current_psi
@@ -342,7 +344,7 @@ class TSFDQN_PHI(Agent):
 
         for test_task in test_tasks:
             fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
-            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
+            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
 
             with torch.no_grad():
@@ -444,30 +446,28 @@ class TSFDQN_PHI(Agent):
                 #{'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
-                {'params': target_loss_coefficient},
+                {'params': target_loss_coefficient, 'maximize': True },
         ]
         #optim = torch.optim.Adam(parameters, lr=1e-3, weight_decay=1e-4)
         optim = torch.optim.Adam(parameters, lr=1e-3)
         loss_task = torch.nn.MSELoss()
 
-        with torch.no_grad():
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-            t_s_values = []
-            t_s1_values = []
-            for g_function in self.g_functions:
-                t_s_values.append(g_function(s_enc))
-                t_s1_values.append(g_function(s1_enc))
+        t_s_values = []
+        t_s1_values = []
+        for g_function in self.g_functions:
+            t_s_values.append(g_function(s_enc))
+            t_s1_values.append(g_function(s1_enc))
 
         s_transformed = self.omegas(torch.concat(t_s_values).flatten())
         s1_transformed = self.omegas(torch.concat(t_s1_values).flatten())
 
         transformed_phi = phi * (self.h_function(s_transformed) + self.h_function(s1_transformed))
 
-        with torch.no_grad():
         # 1.0 is the gamma
-            psi_flatten = psi.swapaxes(1,2).flatten(start_dim=2)
-            next_psi_flatten = next_psi.swapaxes(1,2).flatten(start_dim=2)
+        psi_flatten = psi.swapaxes(1,2).flatten(start_dim=2)
+        next_psi_flatten = next_psi.swapaxes(1,2).flatten(start_dim=2)
 
         transformed_psi = self.omegas(psi_flatten)
         transformed_next_psi = transformed_phi + self.gamma * self.omegas(next_psi_flatten)

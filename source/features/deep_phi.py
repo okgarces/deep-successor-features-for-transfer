@@ -165,11 +165,12 @@ class DeepSF_PHI(SF):
                 #{'params': phi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-4 },
                 #{'params': loss_coefficient, 'lr': 1e-3, 'weight_decay': 1e-3 }
-                {'params': loss_coefficient, 'lr': 1e-3 },
+                {'params': loss_coefficient, 'lr': 1e-3, 'maximize': True },
         ]
 
         phi_loss_value = phi_loss(r_fit, rs).unsqueeze(0)
         optim = torch.optim.Adam(params)
+
         optim.zero_grad()
 
         psi_loss_value = psi_loss(current_psi, merge_current_target_psi).unsqueeze(0)
@@ -270,7 +271,7 @@ class DeepSF_PHI(SF):
         # build new reward function
         # TODO Remove task feature_dim should be called from the agent or config
         n_features = task.feature_dim()
-        fit_w = torch.nn.Linear(n_features, 1, bias=False).to(self.device)
+        fit_w = torch.nn.Linear(n_features, 1).to(self.device)
         
         self.fit_w.append(fit_w)
         self.true_w.append(true_w)
