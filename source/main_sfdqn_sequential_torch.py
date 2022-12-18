@@ -91,5 +91,6 @@ def train():
     print('training SFDQN Sequential')
     train_tasks, test_tasks = generate_tasks(False)
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
+    print('End Training SFDQN Sequential')
 
 train()
