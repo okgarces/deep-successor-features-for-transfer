@@ -71,6 +71,9 @@ class DeepSF(SF):
         # target_model.set_weights(model.parameters())
         update_models_weights(model, target_model)
         self.updates_since_target_updated.append(0)
+
+        # Set target model to eval
+        target_model.eval()
         
         return (model, loss, optim), (target_model, target_loss, target_optim)
         
@@ -105,7 +108,9 @@ class DeepSF(SF):
         target_psi_model, *_ = target_psi_tuple
 
         current_psi = psi_model(states)
-        targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
+
+        with torch.no_grad():
+            targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
         
         # train the SF network
         merge_current_target_psi = current_psi.clone()

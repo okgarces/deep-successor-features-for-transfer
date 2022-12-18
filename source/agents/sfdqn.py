@@ -37,11 +37,12 @@ class SFDQN(Agent):
         self.test_tasks_weights = []
         
     def get_Q_values(self, s, s_enc):
-        q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
-        if not self.use_gpi:
-            c = self.task_index
-        self.c = c
-        return q[:, c,:]
+        with torch.no_grad():
+            q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
+            if not self.use_gpi:
+                c = self.task_index
+            self.c = c
+            return q[:, c,:]
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         
@@ -74,7 +75,7 @@ class SFDQN(Agent):
         gpi_str = 'GPI% \t {:.4f} \t w_err \t {:.4f}'.format(gpi_percent, w_error)
         return sample_str, reward_str, gpi_str
             
-    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000):
+    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1):
         if viewers is None: 
             viewers = [None] * len(train_tasks)
             
@@ -98,40 +99,42 @@ class SFDQN(Agent):
             
         # train each one
         return_data = []
-        for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
-            self.set_active_training_task(index)
-            for t in range(n_samples):
-                
-                # train
-                self.next_sample(viewer, n_view_ev)
-                
-                # test
-                if t % n_test_ev == 0:
-                    Rs = []
-                    for test_index, test_task in enumerate(test_tasks):
-                        R = self.test_agent(test_task, test_index)
-                        Rs.append(R)
-                    avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
-                    return_data.append(avg_R)
-                    self.logger.log_progress(self.get_progress_dict())
-                    self.logger.log_average_reward(avg_R, self.total_training_steps)
-                    self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
+        for _ in range(cycles_per_task):
+            for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
+                self.set_active_training_task(index)
+                for t in range(n_samples):
+                    
+                    # train
+                    self.next_sample(viewer, n_view_ev)
+                    
+                    # test
+                    if t % n_test_ev == 0:
+                        Rs = []
+                        for test_index, test_task in enumerate(test_tasks):
+                            R = self.test_agent(test_task, test_index)
+                            Rs.append(R)
+                        avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
+                        return_data.append(avg_R)
+                        self.logger.log_progress(self.get_progress_dict())
+                        self.logger.log_average_reward(avg_R, self.total_training_steps)
+                        self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
 
-                self.total_training_steps += 1
-        return return_data
+                    self.total_training_steps += 1
+            return return_data
     
     def get_test_action(self, s_enc, w):
-        if random.random() <= self.test_epsilon:
-            a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
-        else:
-            psi = self.sf.get_successors(s_enc)
-            q = w(psi)[:,:,:,0]
-            # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
-            c = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+        with torch.no_grad():
+            if random.random() <= self.test_epsilon:
+                a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
+            else:
+                psi = self.sf.get_successors(s_enc)
+                q = w(psi)[:,:,:,0]
+                # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
+                c = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
 
-            q = q[:, c,:]
-            a = torch.argmax(q)
-        return a
+                q = q[:, c,:]
+                a = torch.argmax(q)
+            return a
             
     def test_agent(self, task, test_index):
         R = 0.0
@@ -146,7 +149,7 @@ class SFDQN(Agent):
             s1_enc = self.encoding(s1)
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper(w, task, r, s, a, s1).item()
+            loss_t = self.update_test_reward_mapper(w, task, r, s_enc, a, s1_enc).item()
             accum_loss += loss_t
             # loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1, test_index)
 
@@ -162,29 +165,9 @@ class SFDQN(Agent):
 
         return R
 
-    def update_test_reward_mapper_true_w(self, w_approx, task):
-
-        true_w = task.get_w()
-        # Learning rate alpha (Weights)
-        optim = torch.optim.SGD(w_approx.parameters(), lr=0.05)
-        loss_task = torch.nn.MSELoss()
-
-        optim.zero_grad()
-
-        loss = loss_task(true_w, w_approx.weight)
-        loss.backward()
-        
-        # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
-            optim.step()
-        # If inf loss
-        return loss
-
-
     def update_test_reward_mapper(self, w_approx, task, r, s, a, s1):
         # Return Loss
         phi = task.features(s,a,s1)
-        phi = phi.clone().detach().requires_grad_(False)
 
         # Learning rate alpha (Weights)
         optim = torch.optim.SGD(w_approx.parameters(), lr=0.005, weight_decay=0.01)
@@ -197,10 +180,7 @@ class SFDQN(Agent):
         loss = loss_task(w_approx(phi), r_tensor)
         loss.backward()
         
-        # Otherwise gradients will be computed to inf or nan.
-        if not (torch.isnan(w_approx.weight.grad).any() or torch.isinf(w_approx.weight.grad).any()) :
-            optim.step()
-        # If inf loss
+        optim.step()
         return loss
 
     def update_test_reward_mapper_ascent_version(self, w_approx, r, s, a, s1, task_index):
