@@ -179,11 +179,11 @@ class DeepSF(SF):
         target_psi_model, *_ = target_psi_tuple
 
         params = [
-                {'params': psi_model.parameters(), 'lr': 1e-3},
-                {'params': task_w.parameters(), 'lr': 1e-3},
+                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
             ]
 
-        optim = torch.optim.Adam(params)
+        optim = torch.optim.SGD(params, lr=1e-3)
 
         current_psi = psi_model(states)
 
