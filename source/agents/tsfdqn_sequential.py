@@ -8,11 +8,11 @@ from utils.logger import get_logger_level
 from utils.torch import get_torch_device
 
 
-class SFDQN(Agent):
+class TSFDQN(Agent):
 
     def __init__(self, deep_sf, buffer_handle, *args, use_gpi=True, test_epsilon=0.03, **kwargs):
         """
-        Creates a new SFDQN agent per the specifications in the original paper.
+        Creates a new TSFDQN agent per the specifications in the original paper.
         
         Parameters
         ----------
@@ -26,7 +26,7 @@ class SFDQN(Agent):
             the exploration parameter for epsilon greedy used during testing 
             (defaults to 0.03 as in the paper)
         """
-        super(SFDQN, self).__init__(*args, **kwargs)
+        super(TSFDQN, self).__init__(*args, **kwargs)
         self.sf = deep_sf
         self.buffer_handle = buffer_handle
         self.use_gpi = use_gpi
@@ -39,6 +39,11 @@ class SFDQN(Agent):
         # Sequential Successor Features
         self.buffers = []
 
+        # Transformed Successor Features
+        self.omegas = None
+        self.g_functions = []
+        self.h_function = None
+
     def set_active_training_task(self, index):
         """
         Sets the task at the requested index as the current task the agent will train on.
@@ -46,10 +51,13 @@ class SFDQN(Agent):
         """
         
         # Same as Parent Agent
-        super(SFDQN, self).set_active_training_task(index)
+        super(TSFDQN, self).set_active_training_task(index)
         
         # Sequential
         self.buffer = self.buffers[index]
+
+        # Transformed Successor Feature
+        self.active_g_function = self.g_functions[index]
         
     def get_Q_values(self, s, s_enc):
         with torch.no_grad():
@@ -58,6 +66,18 @@ class SFDQN(Agent):
                 c = self.task_index
             self.c = c
             return q[:, c,:]
+
+    def _init_g_function(self, states_dim, features_dim):
+        g_function = torch.nn.Linear(states_dim, features_dim, bias=False, device=self.device)
+        return g_function
+
+
+    def _init_h_function(self, features_dim):
+        g_function = torch.nn.Linear(features_dim, 1, bias=True, device=self.device)
+        return g_function
+
+    def _init_omegas(self):
+        pass
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         
@@ -75,18 +95,25 @@ class SFDQN(Agent):
                 self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [1], self.total_training_steps)
 
     def reset(self):
-        super(SFDQN, self).reset()
+        super(TSFDQN, self).reset()
         self.sf.reset()
 
         for buffer in self.buffers:
             buffer.reset()
 
     def add_training_task(self, task):
-        super(SFDQN, self).add_training_task(task)
+        super(TSFDQN, self).add_training_task(task)
         self.sf.add_training_task(task, source=None)
 
-        # Append Buffer
+        # Sequential Learning Append Buffer
         self.buffers.append(self.buffer_handle())
+
+        # Transformed Successor Feature
+        # Encode Dim encapsulates the state encoding dimension
+        self.g_functions.append(self._init_g_function(task.encode_dim(), task.feature_dim()))
+
+        if self.h_function is None:
+            self.h_function = self._init_h_function(task.feature_dim())
 
     def get_progress_dict(self):
         if self.sf is not None:
@@ -112,7 +139,7 @@ class SFDQN(Agent):
         return return_dict
     
     def get_progress_strings(self):
-        sample_str, reward_str = super(SFDQN, self).get_progress_strings()
+        sample_str, reward_str = super(TSFDQN, self).get_progress_strings()
         gpi_percent = self.sf.GPI_usage_percent(self.task_index)
         w_error = torch.linalg.norm(self.sf.fit_w[self.task_index] - self.sf.true_w[self.task_index])
         gpi_str = 'GPI% \t {:.4f} \t w_err \t {:.4f}'.format(gpi_percent, w_error)
@@ -128,7 +155,7 @@ class SFDQN(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
+            fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
             w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
 
@@ -163,7 +190,7 @@ class SFDQN(Agent):
                         self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
 
                     self.total_training_steps += 1
-        return return_data
+            return return_data
     
     def get_test_action(self, s_enc, w):
         with torch.no_grad():
