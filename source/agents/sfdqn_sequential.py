@@ -96,7 +96,7 @@ class SFDQN(Agent):
     def get_progress_dict(self):
         if self.sf is not None:
             gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight - self.sf.true_w[self.task_index])
+            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
         else:
             gpi_percent = None
             w_error = None
@@ -119,7 +119,7 @@ class SFDQN(Agent):
     def get_progress_strings(self):
         sample_str, reward_str = super(SFDQN, self).get_progress_strings()
         gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-        w_error = torch.linalg.norm(self.sf.fit_w[self.task_index] - self.sf.true_w[self.task_index])
+        w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
         gpi_str = 'GPI% \t {:.4f} \t w_err \t {:.4f}'.format(gpi_percent, w_error)
         return sample_str, reward_str, gpi_str
             
