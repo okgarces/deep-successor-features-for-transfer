@@ -50,7 +50,7 @@ class SFDQN(Agent):
         
         # Sequential
         self.buffer = self.buffers[index]
-        
+
     def get_Q_values(self, s, s_enc):
         with torch.no_grad():
             q, c = self.sf.GPI(s_enc, self.task_index, update_counters=self.use_gpi)
@@ -73,6 +73,11 @@ class SFDQN(Agent):
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss = losses
                 self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [1], self.total_training_steps)
+
+        # Print weights for Reward Mapper
+        if self.total_training_steps % 1000 == 0:
+            task_w = self.sf.fit_w[self.task_index]
+            print(f'Current task {self.task_index} Reward Mapper {task_w.weight}')
 
     def reset(self):
         super(SFDQN, self).reset()
@@ -212,14 +217,16 @@ class SFDQN(Agent):
         phi = task.features(s,a,s1)
 
         # Learning rate alpha (Weights)
-        optim = torch.optim.SGD(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
+        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-2)
         loss_task = torch.nn.MSELoss()
 
-        r_tensor = torch.tensor(r).detach().float().unsqueeze(0).requires_grad_(False).to(self.device)
+        with torch.no_grad():
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         optim.zero_grad()
 
-        loss = loss_task(w_approx(phi), r_tensor)
+        r_fit = w_approx(phi)
+        loss = loss_task(r_fit, r_tensor)
         loss.backward()
         
         optim.step()
