@@ -217,7 +217,7 @@ class SFDQN(Agent):
         phi = task.features(s,a,s1)
 
         # Learning rate alpha (Weights)
-        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
         loss_task = torch.nn.MSELoss()
 
         with torch.no_grad():

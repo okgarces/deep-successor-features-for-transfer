@@ -180,7 +180,7 @@ class DeepSF(SF):
 
         params = [
                 {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': task_w.parameters(), 'lr': 1e-3 },
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
             ]
 
         optim = torch.optim.Adam(params)

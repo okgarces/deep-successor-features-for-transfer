@@ -68,15 +68,16 @@ class TSFDQN(Agent):
             return q[:, c,:]
 
     def _init_g_function(self, states_dim, features_dim):
+        # TODO Review this Linear implementation
         g_function = torch.nn.Linear(states_dim, features_dim, bias=False, device=self.device)
         return g_function
-
 
     def _init_h_function(self, features_dim):
         g_function = torch.nn.Linear(features_dim, 1, bias=True, device=self.device)
         return g_function
 
     def _init_omegas(self):
+        # TODO Add code for omegas
         pass
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
@@ -93,6 +94,11 @@ class TSFDQN(Agent):
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss = losses
                 self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [1], self.total_training_steps)
+
+        # Print weights for Reward Mapper
+        if self.total_training_steps % 1000 == 0:
+            task_w = self.sf.fit_w[self.task_index]
+            print(f'Current task {self.task_index} Reward Mapper {task_w.weight}')
 
     def reset(self):
         super(TSFDQN, self).reset()
@@ -118,7 +124,7 @@ class TSFDQN(Agent):
     def get_progress_dict(self):
         if self.sf is not None:
             gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight - self.sf.true_w[self.task_index])
+            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
         else:
             gpi_percent = None
             w_error = None
@@ -141,7 +147,7 @@ class TSFDQN(Agent):
     def get_progress_strings(self):
         sample_str, reward_str = super(TSFDQN, self).get_progress_strings()
         gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-        w_error = torch.linalg.norm(self.sf.fit_w[self.task_index] - self.sf.true_w[self.task_index])
+        w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
         gpi_str = 'GPI% \t {:.4f} \t w_err \t {:.4f}'.format(gpi_percent, w_error)
         return sample_str, reward_str, gpi_str
             
@@ -155,7 +161,7 @@ class TSFDQN(Agent):
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
+            fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
             w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
 
@@ -218,10 +224,8 @@ class TSFDQN(Agent):
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
-            # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
             loss_t = self.update_test_reward_mapper(w, task, r, s_enc, a, s1_enc).item()
             accum_loss += loss_t
-            # loss_t = self.update_test_reward_mapper_ascent_version(w, r, s, a, s1, test_index)
 
             # Update states
             s, s_enc = s1, s1_enc
@@ -240,40 +244,20 @@ class TSFDQN(Agent):
         phi = task.features(s,a,s1)
 
         # Learning rate alpha (Weights)
-        optim = torch.optim.SGD(w_approx.parameters(), lr=0.005, weight_decay=0.01)
+        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
         loss_task = torch.nn.MSELoss()
 
-        r_tensor = torch.tensor(r).detach().float().unsqueeze(0).requires_grad_(False).to(self.device)
+        with torch.no_grad():
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         optim.zero_grad()
 
-        loss = loss_task(w_approx(phi), r_tensor)
+        r_fit = w_approx(phi)
+        loss = loss_task(r_fit, r_tensor)
         loss.backward()
         
         optim.step()
         return loss
-
-    def update_test_reward_mapper_ascent_version(self, w_approx, r, s, a, s1, task_index):
-        # Return Loss
-        phi = self.phi(s, a, s1)
-
-        # Learning rate alpha (Weights)
-        #loss_task = torch.nn.MSELoss()
-
-        #loss = loss_task(w_approx(phi), torch.tensor(r).float().unsqueeze(0))
-        #w_control = w_approx.weight
-        w_control = w_approx
-
-        # Compute new w
-        r_fit = torch.sum(phi * w_control)
-        w_control = w_control + self.sf.alpha_w * (r - r_fit) * phi
-
-        # Update weights
-        #with torch.no_grad():
-        #    w_approx.weight = torch.nn.Parameter(w_control)
-        self.test_tasks_weights[task_index] = w_control
-
-        #return loss
 
     def get_target_reward_mapper_error(self, r, loss, task_index, ts):
         return_dict = {

@@ -59,7 +59,7 @@ class DeepTSF(SF):
 
         n_features = task.feature_dim()
         fit_w = torch.Tensor(1, n_features).uniform_(-0.01, 0.01).to(self.device)
-        w_approx = torch.nn.Linear(n_features, 1, bias=True, device=self.device)
+        w_approx = torch.nn.Linear(n_features, 1, bias=False, device=self.device)
 
         with torch.no_grad():
             w_approx.weight = torch.nn.Parameter(fit_w)
@@ -179,8 +179,8 @@ class DeepTSF(SF):
         target_psi_model, *_ = target_psi_tuple
 
         params = [
-                {'params': psi_model.parameters(), 'lr': 1e-3},
-                {'params': task_w.parameters(), 'lr': 1e-3},
+                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
             ]
 
         optim = torch.optim.Adam(params)
@@ -198,12 +198,27 @@ class DeepTSF(SF):
         optim.zero_grad()
 
         r_fit = task_w(phis)
-
         l1 = psi_loss(current_psi, merge_current_target_psi)
         l2 = psi_loss(r_fit, rs)
 
         loss = l1 + l2
         loss.backward()
+
+        # log gradients this is only a way to track gradients from time to time
+        if self.updates_since_target_updated[policy_index] >= self.target_update_ev - 1:
+            print(f'########### BEGIN #################')
+            print(f'Policy Index {policy_index}')
+            print(f' Update STEP # {self.updates_since_target_updated[policy_index]}')
+            for params in psi_model.parameters():
+                print(f'Gradients of Psi {params.grad}')
+
+            for params in task_w.parameters():
+                print(f'Gradients of W {params.grad}')
+
+            for params in target_psi_model.parameters():
+                print(f'Gradients of Psi Target {params.grad}')
+            print(f'########### END #################')
+
         optim.step()
 
         # Finish train the SF network
