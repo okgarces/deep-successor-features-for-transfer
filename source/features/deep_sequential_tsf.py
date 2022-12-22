@@ -153,79 +153,18 @@ class DeepTSF(SF):
 
         return torch.stack(predictions, axis=1).to(self.device)
     
+    def get_next_successor(self, state, policy_index):
+        _, next_psi_tuple = self.psi[policy_index]
+        psi, *_ = next_psi_tuple
+        return psi(state)
+
+    def get_next_successors(self, state):
+        #return self.all_output_model.predict_on_batch(state)
+        predictions = []
+        for policy_index in range(len(self.psi)):
+            predictions.append(self.get_next_successor(state, policy_index))
+
+        return torch.stack(predictions, axis=1).to(self.device)
+
     def update_successor(self, transitions, policy_index, use_gpi=True):
-        if transitions is None:
-            return
-
-        states, actions, rs, phis, next_states, gammas = transitions
-        n_batch = len(gammas)
-        indices = torch.arange(n_batch)
-        gammas = gammas.reshape((-1, 1))
-        task_w = self.fit_w[policy_index]
-         
-        # next actions come from current Successor Feature
-        if use_gpi:
-            q1, _ = self.GPI(next_states, policy_index)
-            next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
-        else:
-            sf = self.get_successor(next_states, policy_index)
-            q1 = task_w(sf)
-            # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
-            next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
-
-        # compute the targets and TD errors
-        psi_tuple, target_psi_tuple = self.psi[policy_index]
-        psi_model, psi_loss, _ = psi_tuple
-        target_psi_model, *_ = target_psi_tuple
-
-        params = [
-                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-            ]
-
-        optim = torch.optim.Adam(params)
-
-        current_psi = psi_model(states)
-
-        with torch.no_grad():
-            targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
-        
-        # train the SF network
-        merge_current_target_psi = current_psi.clone()
-        merge_current_target_psi[indices, actions,:] = targets
-        # psi_model.train_on_batch(states, current_psi)
-
-        optim.zero_grad()
-
-        r_fit = task_w(phis)
-        l1 = psi_loss(current_psi, merge_current_target_psi)
-        l2 = psi_loss(r_fit, rs)
-
-        loss = l1 + l2
-        loss.backward()
-
-        # log gradients this is only a way to track gradients from time to time
-        if self.updates_since_target_updated[policy_index] >= self.target_update_ev - 1:
-            print(f'########### BEGIN #################')
-            print(f'Policy Index {policy_index}')
-            print(f' Update STEP # {self.updates_since_target_updated[policy_index]}')
-            for params in psi_model.parameters():
-                print(f'Gradients of Psi {params.grad}')
-
-            for params in task_w.parameters():
-                print(f'Gradients of W {params.grad}')
-
-            for params in target_psi_model.parameters():
-                print(f'Gradients of Psi Target {params.grad}')
-            print(f'########### END #################')
-
-        optim.step()
-
-        # Finish train the SF network
-        # update the target SF network
-        self.updates_since_target_updated[policy_index] += 1
-        if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
-            update_models_weights(psi_model, target_psi_model)
-            self.updates_since_target_updated[policy_index] = 0
-
-        return loss, l1, l2 
+        raise Exception('This function should not be called')

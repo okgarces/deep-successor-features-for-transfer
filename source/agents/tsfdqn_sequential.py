@@ -6,6 +6,7 @@ import torch
 from agents.agent import Agent
 from utils.logger import get_logger_level
 from utils.torch import get_torch_device
+from utils.torch import update_models_weights
 
 
 class TSFDQN(Agent):
@@ -40,7 +41,7 @@ class TSFDQN(Agent):
         self.buffers = []
 
         # Transformed Successor Features
-        self.omegas = None
+        self.omegas = []
         self.g_functions = []
         self.h_function = None
 
@@ -68,17 +69,19 @@ class TSFDQN(Agent):
             return q[:, c,:]
 
     def _init_g_function(self, states_dim, features_dim):
-        # TODO Review this Linear implementation
-        g_function = torch.nn.Linear(states_dim, features_dim, bias=False, device=self.device)
+        # g : |S| -> |d|, d features dimension
+        g_function = torch.nn.Linear(states_dim, features_dim, bias=True, device=self.device)
         return g_function
 
     def _init_h_function(self, features_dim):
-        g_function = torch.nn.Linear(features_dim, 1, bias=True, device=self.device)
-        return g_function
+        # h : |d| -> |d|, d features dimension
+        # This affine transformation
+        h_function = torch.nn.Linear(features_dim, features_dim, bias=True, device=self.device)
+        return h_function
 
-    def _init_omegas(self):
-        # TODO Add code for omegas
-        pass
+    def _init_omega(self, features_dim):
+        omega = torch.Tensor(features_dim, device=self.device).uniform_(0,1)
+        return omega
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         
@@ -89,7 +92,7 @@ class TSFDQN(Agent):
         # update SFs
         if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
-            losses = self.sf.update_successor(transitions, self.task_index, self.use_gpi)
+            losses = self.update_successor(transitions, self.task_index, self.use_gpi)
         
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss = losses
@@ -99,6 +102,97 @@ class TSFDQN(Agent):
         if self.total_training_steps % 1000 == 0:
             task_w = self.sf.fit_w[self.task_index]
             print(f'Current task {self.task_index} Reward Mapper {task_w.weight}')
+            print(f'Current omegas {self.task_index} OMEGAS Weights {self.omegas}')
+
+    def update_successor(self, transitions, policy_index, use_gpi=True):
+        if transitions is None:
+            return
+
+        if self.h_function is None:
+            raise Exception('Affine Function (h) is not initialized')
+
+        g_function = self.g_functions[policy_index]
+
+        states, actions, rs, phis, next_states, gammas = transitions
+        n_batch = len(gammas)
+        indices = torch.arange(n_batch)
+        gammas = gammas.reshape((-1, 1))
+        task_w = self.sf.fit_w[policy_index]
+         
+        # next actions come from current Successor Feature
+        if use_gpi:
+            q1, _ = self.sf.GPI(next_states, policy_index)
+            next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
+        else:
+            sf = self.sf.get_successor(next_states, policy_index)
+            q1 = task_w(sf)
+            # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
+            next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
+
+        # compute the targets and TD errors
+        psi_tuple, target_psi_tuple = self.sf.psi[policy_index]
+        psi_model, psi_loss, _ = psi_tuple
+        target_psi_model, *_ = target_psi_tuple
+
+        params = [
+                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': g_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': self.h_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+            ]
+
+        optim = torch.optim.Adam(params)
+
+        current_psi = psi_model(states)
+
+        transformed_state = g_function(states)
+        transformed_next_state = g_function(next_states)
+        affine_transformed_states = self.h_function(transformed_state) + self.h_function(transformed_next_state)
+
+        transformed_phis = affine_transformed_states * phis
+
+        with torch.no_grad():
+            targets = transformed_phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
+        
+        # train the SF network
+        merge_current_target_psi = current_psi.clone()
+        merge_current_target_psi[indices, actions,:] = targets
+        # psi_model.train_on_batch(states, current_psi)
+
+        optim.zero_grad()
+
+        r_fit = task_w(transformed_phis)
+        l1 = psi_loss(current_psi, merge_current_target_psi)
+        l2 = psi_loss(r_fit, rs)
+
+        loss = l1 + l2
+        loss.backward()
+
+        # log gradients this is only a way to track gradients from time to time
+        if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
+            print(f'########### BEGIN #################')
+            print(f'Policy Index {policy_index}')
+            print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
+            for params in psi_model.parameters():
+                print(f'Gradients of Psi {params.grad}')
+
+            for params in task_w.parameters():
+                print(f'Gradients of W {params.grad}')
+
+            for params in target_psi_model.parameters():
+                print(f'Gradients of Psi Target {params.grad}')
+            print(f'########### END #################')
+
+        optim.step()
+
+        # Finish train the SF network
+        # update the target SF network
+        self.sf.updates_since_target_updated[policy_index] += 1
+        if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev:
+            update_models_weights(psi_model, target_psi_model)
+            self.sf.updates_since_target_updated[policy_index] = 0
+
+        return loss, l1, l2 
 
     def reset(self):
         super(TSFDQN, self).reset()
@@ -120,6 +214,8 @@ class TSFDQN(Agent):
 
         if self.h_function is None:
             self.h_function = self._init_h_function(task.feature_dim())
+
+        self.omegas.append(self._init_omega(task.feature_dim()))
 
     def get_progress_dict(self):
         if self.sf is not None:
@@ -174,6 +270,15 @@ class TSFDQN(Agent):
             self.test_tasks_weights.append(w_approx)
             
         # train each one
+        # Regularize sum w_i = 1
+        # Unsqueeze to have [n_tasks, n_actions, n_features]
+        self.omegas = torch.vstack(self.omegas).unsqueeze(1)
+
+        with torch.no_grad():
+            self.omegas = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
+
+        self.omegas.requires_grad_(True)
+
         return_data = []
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
@@ -203,12 +308,12 @@ class TSFDQN(Agent):
             if random.random() <= self.test_epsilon:
                 a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
             else:
-                psi = self.sf.get_successors(s_enc)
-                q = w(psi)[:,:,:,0]
-                # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
-                c = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+                successor_features = self.sf.get_successors(s_enc)
+                tsf = torch.sum(successor_features * self.omegas, axis=1)
 
-                q = q[:, c,:]
+                q = w(tsf)
+                # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
+                # Target TSF only Use Q-Learning
                 a = torch.argmax(q)
             return a
             
@@ -240,23 +345,72 @@ class TSFDQN(Agent):
         return R
 
     def update_test_reward_mapper(self, w_approx, task, r, s, a, s1):
+
+        if self.h_function is None:
+            raise Exception('Affine Function (h) is not initialized')
+
+
+        self.omegas.requires_grad_(True)
+
+        parameters = [
+            {'params': w_approx.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+            {'params': self.omegas,  'lr': 1e-3, 'weight_decay': 1e-2},
+        ]
+
         # Return Loss
         phi = task.features(s,a,s1)
 
-        # Learning rate alpha (Weights)
-        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
-        loss_task = torch.nn.MSELoss()
+        # Transformed States
+        t_states = []
+        t_next_states = []
 
         with torch.no_grad():
+            for g in self.g_functions:
+                state = g(s)
+                next_state = g(s1)
+                t_states.append(state)
+                t_next_states.append(next_state)
+
+            # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
+            t_states = torch.vstack(t_states).unsqueeze(1)
+            t_next_states = torch.vstack(t_next_states).unsqueeze(1)
+
+        weighted_states = torch.sum(t_states * self.omegas, axis=0)
+        weighted_next_states = torch.sum(t_next_states * self.omegas, axis=0)
+
+        with torch.no_grad():
+            affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
+            transformed_phi = phi * affine_states
+
+            successor_features = self.sf.get_successors(s)
+            next_successor_features = self.sf.get_next_successors(s)
+
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-        optim.zero_grad()
+        tsf = torch.sum(successor_features * self.omegas, axis=1)
+        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * self.omegas, axis=0)
 
-        r_fit = w_approx(phi)
-        loss = loss_task(r_fit, r_tensor)
+        # Learning rate alpha (Weights)
+        optim = torch.optim.Adam(parameters)
+        loss_task = torch.nn.MSELoss()
+
+        r_fit = w_approx(transformed_phi)
+
+        l1 = loss_task(tsf, next_tsf)
+        l2 = loss_task(r_fit, r_tensor)
+
+        loss = l1 + l2
+
+        optim.zero_grad()
         loss.backward()
-        
+
         optim.step()
+
+        # Sum_i omega_i = 1
+        with torch.no_grad():
+            self.omegas.clamp_(0,1)
+            self.omegas = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
+
         return loss
 
     def get_target_reward_mapper_error(self, r, loss, task_index, ts):
