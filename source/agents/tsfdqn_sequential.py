@@ -80,7 +80,7 @@ class TSFDQN(Agent):
         return h_function
 
     def _init_omega(self, features_dim):
-        omega = torch.Tensor(features_dim, device=self.device).uniform_(0,1)
+        omega = torch.Tensor(features_dim).uniform_(0,1).to(self.device)
         return omega
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
