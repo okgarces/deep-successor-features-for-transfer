@@ -307,7 +307,7 @@ class TSFDQN(Agent):
                         self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
 
                     self.total_training_steps += 1
-            return return_data
+        return return_data
     
     def get_test_action(self, s_enc, w):
         with torch.no_grad():
