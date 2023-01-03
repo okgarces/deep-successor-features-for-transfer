@@ -37,7 +37,7 @@ class DeepTSF(SF):
         SF.reset(self)
         self.updates_since_target_updated = []
 
-    def add_training_task(self, task, source=None):
+    def add_training_task(self, task, source=None, g_function_model={}, h_function_model={}):
         """
         Adds a successor feature representation for the specified task.
         
@@ -49,10 +49,6 @@ class DeepTSF(SF):
             if specified and not None, the parameters of the successor features for the task at the source
             index should be copied to the new successor features, as suggested in [1]
         """
-        
-        # add successor features to the library
-        self.psi.append(self.build_successor(task, source))
-        self.n_tasks = len(self.psi)
         
         # build new reward function
         true_w = task.get_w()
@@ -66,6 +62,10 @@ class DeepTSF(SF):
 
         self.true_w.append(true_w)
         self.fit_w.append(w_approx)
+
+        # add successor features to the library
+        self.psi.append(self.build_successor(task, source, w_approx, g_function_model, h_function_model))
+        self.n_tasks = len(self.psi)
         
         # add statistics
         for i in range(len(self.gpi_counters)):
@@ -99,7 +99,7 @@ class DeepTSF(SF):
         task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
         return q, task
         
-    def build_successor(self, task, source=None):
+    def build_successor(self, task, source=None, task_w={}, g_function={}, h_function={}):
         
         # input tensor for all networks is shared
         # TODO the environment should send the action_count, feature_dim and inputs?
@@ -110,7 +110,7 @@ class DeepTSF(SF):
             
         # build SF network and copy its weights from previous task
         # output shape is assumed to be [n_batch, n_actions, n_features]
-        model, loss, optim = self.pytorch_model_handle(self.inputs, self.n_actions * self.n_features, (self.n_actions, self.n_features), 1)
+        model, loss, _ = self.pytorch_model_handle(self.inputs, self.n_actions * self.n_features, (self.n_actions, self.n_features), 1)
 
         if source is not None and self.n_tasks > 0:
             source_psi_tuple, _ = self.psi[source]
@@ -128,9 +128,17 @@ class DeepTSF(SF):
         #self.all_output_model.compile('sgd', 'mse')  # dummy compile so Keras doesn't complain
         #
 
+        params = [
+                {'params': model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': g_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': h_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+            ]
+
+        optim = torch.optim.Adam(params)
         ## build target model and copy the weights 
         # This is ModelTuple
-        target_model, target_loss, target_optim = self.pytorch_model_handle(self.inputs, self.n_actions * self.n_features, (self.n_actions, self.n_features), 1)
+        target_model, _, _ = self.pytorch_model_handle(self.inputs, self.n_actions * self.n_features, (self.n_actions, self.n_features), 1)
         # target_model.set_weights(model.parameters())
         update_models_weights(model, target_model)
         self.updates_since_target_updated.append(0)
@@ -138,7 +146,7 @@ class DeepTSF(SF):
         # Set target model to eval
         target_model.eval()
         
-        return (model, loss, optim), (target_model, target_loss, target_optim)
+        return (model, loss, optim), (target_model, None, None)
         
     def get_successor(self, state, policy_index):
         psi_tuple, _ = self.psi[policy_index]

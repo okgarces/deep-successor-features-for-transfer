@@ -140,10 +140,9 @@ class SFDQN(Agent):
             with torch.no_grad():
                 w_approx.weight = torch.nn.Parameter(fit_w)
 
-            #fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
-            #w_approx = fit_w
-
-            self.test_tasks_weights.append(w_approx)
+            # LR 1e-3 and wd 1e-2
+            optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
+            self.test_tasks_weights.append((w_approx, optim))
             
         # train each one
         return_data = []
@@ -186,7 +185,7 @@ class SFDQN(Agent):
             
     def test_agent(self, task, test_index):
         R = 0.0
-        w = self.test_tasks_weights[test_index]
+        w, optim = self.test_tasks_weights[test_index]
         s = task.initialize()
         s_enc = self.encoding(s)
 
@@ -197,7 +196,7 @@ class SFDQN(Agent):
             s1_enc = self.encoding(s1)
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper(w, task, r, s_enc, a, s1_enc).item()
+            loss_t = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc).item()
             accum_loss += loss_t
 
             # Update states
@@ -212,12 +211,9 @@ class SFDQN(Agent):
 
         return R
 
-    def update_test_reward_mapper(self, w_approx, task, r, s, a, s1):
+    def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
         # Return Loss
         phi = task.features(s,a,s1)
-
-        # Learning rate alpha (Weights)
-        optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
         loss_task = torch.nn.MSELoss()
 
         with torch.no_grad():

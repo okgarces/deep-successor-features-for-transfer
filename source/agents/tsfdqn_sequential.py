@@ -131,17 +131,8 @@ class TSFDQN(Agent):
 
         # compute the targets and TD errors
         psi_tuple, target_psi_tuple = self.sf.psi[policy_index]
-        psi_model, psi_loss, _ = psi_tuple
+        psi_model, psi_loss, optim = psi_tuple
         target_psi_model, *_ = target_psi_tuple
-
-        params = [
-                {'params': psi_model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': g_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': self.h_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-            ]
-
-        optim = torch.optim.Adam(params)
 
         current_psi = psi_model(states)
 
@@ -162,6 +153,7 @@ class TSFDQN(Agent):
         optim.zero_grad()
 
         r_fit = task_w(transformed_phis)
+
         l1 = psi_loss(current_psi, merge_current_target_psi)
         l2 = psi_loss(r_fit, rs)
 
@@ -175,6 +167,12 @@ class TSFDQN(Agent):
             print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
             for params in psi_model.parameters():
                 print(f'Gradients of Psi {params.grad}')
+
+            for params in g_function.parameters():
+                print(f'Gradients of G function {params.grad}')
+
+            for params in self.h_function.parameters():
+                print(f'Gradients of H function {params.grad}')
 
             for params in task_w.parameters():
                 print(f'Gradients of W {params.grad}')
@@ -203,19 +201,20 @@ class TSFDQN(Agent):
 
     def add_training_task(self, task):
         super(TSFDQN, self).add_training_task(task)
-        self.sf.add_training_task(task, source=None)
-
         # Sequential Learning Append Buffer
         self.buffers.append(self.buffer_handle())
 
         # Transformed Successor Feature
         # Encode Dim encapsulates the state encoding dimension
-        self.g_functions.append(self._init_g_function(task.encode_dim(), task.feature_dim()))
+        g_function = self._init_g_function(task.encode_dim(), task.feature_dim())
+        self.g_functions.append(g_function)
 
         if self.h_function is None:
             self.h_function = self._init_h_function(task.feature_dim())
 
         self.omegas.append(self._init_omega(task.feature_dim()))
+        # SF model will keep the model optimizer
+        self.sf.add_training_task(task, None, g_function, self.h_function)
 
     def get_progress_dict(self):
         if self.sf is not None:
@@ -256,6 +255,16 @@ class TSFDQN(Agent):
         for train_task in train_tasks:
             self.add_training_task(train_task)
 
+        # train each one
+        # Regularize sum w_i = 1
+        # Unsqueeze to have [n_tasks, n_actions, n_features]
+        # Initialize Omegas
+        self.omegas = torch.vstack(self.omegas).unsqueeze(1)
+        with torch.no_grad():
+            self.omegas = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
+        self.omegas.requires_grad_(True)
+
+        # Initialize Target Reward Mappers and optimizer
         for test_task in test_tasks:
             fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
             w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
@@ -266,20 +275,17 @@ class TSFDQN(Agent):
 
             #fit_w = torch.Tensor(test_task.feature_dim(), 1).uniform_(-0.01, 0.01).to(self.device)
             #w_approx = fit_w
+            # Learning rate alpha (Weights)
+            parameters = [
+                {'params': w_approx.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': self.omegas,  'lr': 1e-3, 'weight_decay': 1e-2},
+            ]
 
-            self.test_tasks_weights.append(w_approx)
-            
-        # train each one
-        # Regularize sum w_i = 1
-        # Unsqueeze to have [n_tasks, n_actions, n_features]
-        self.omegas = torch.vstack(self.omegas).unsqueeze(1)
-
-        with torch.no_grad():
-            self.omegas = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
-
-        self.omegas.requires_grad_(True)
+            optim = torch.optim.Adam(parameters)
+            self.test_tasks_weights.append((w_approx, optim))
 
         return_data = []
+
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
                 self.set_active_training_task(index)
@@ -319,7 +325,7 @@ class TSFDQN(Agent):
             
     def test_agent(self, task, test_index):
         R = 0.0
-        w = self.test_tasks_weights[test_index]
+        w, optim = self.test_tasks_weights[test_index]
         s = task.initialize()
         s_enc = self.encoding(s)
 
@@ -329,7 +335,7 @@ class TSFDQN(Agent):
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
-            loss_t = self.update_test_reward_mapper(w, task, r, s_enc, a, s1_enc).item()
+            loss_t = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc).item()
             accum_loss += loss_t
 
             # Update states
@@ -344,18 +350,12 @@ class TSFDQN(Agent):
 
         return R
 
-    def update_test_reward_mapper(self, w_approx, task, r, s, a, s1):
+    def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
 
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
 
-
         self.omegas.requires_grad_(True)
-
-        parameters = [
-            {'params': w_approx.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-            {'params': self.omegas,  'lr': 1e-3, 'weight_decay': 1e-2},
-        ]
 
         # Return Loss
         phi = task.features(s,a,s1)
@@ -380,7 +380,7 @@ class TSFDQN(Agent):
 
         with torch.no_grad():
             affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
-            transformed_phi = phi * affine_states
+            transformed_phi = phi * affine_states.squeeze(0)
 
             successor_features = self.sf.get_successors(s)
             next_successor_features = self.sf.get_next_successors(s)
@@ -388,10 +388,8 @@ class TSFDQN(Agent):
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         tsf = torch.sum(successor_features * self.omegas, axis=1)
-        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * self.omegas, axis=0)
+        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * self.omegas, axis=1)
 
-        # Learning rate alpha (Weights)
-        optim = torch.optim.Adam(parameters)
         loss_task = torch.nn.MSELoss()
 
         r_fit = w_approx(transformed_phi)
@@ -403,7 +401,6 @@ class TSFDQN(Agent):
 
         optim.zero_grad()
         loss.backward()
-
         optim.step()
 
         # Sum_i omega_i = 1
