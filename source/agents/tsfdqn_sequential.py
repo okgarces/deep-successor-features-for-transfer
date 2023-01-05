@@ -332,13 +332,18 @@ class TSFDQN(Agent):
         s_enc = self.encoding(s)
 
         accum_loss = 0
+        total_phi_loss = 0
+        total_psi_loss = 0
+
         for _ in range(self.T):
             a = self.get_test_action(s_enc, w)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
-            loss_t = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc).item()
-            accum_loss += loss_t
+            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
+            accum_loss += loss_t.item()
+            total_phi_loss += phi_loss.item()
+            total_psi_loss += psi_loss.item()
 
             # Update states
             s, s_enc = s1, s1_enc
@@ -348,7 +353,7 @@ class TSFDQN(Agent):
                 break
 
         # Log accum loss for T
-        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, test_index, self.T))
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, 1, self.T))
 
         return R
 
@@ -387,8 +392,9 @@ class TSFDQN(Agent):
 
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
+            next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * self.omegas, axis=1)
+
         tsf = torch.sum(successor_features * self.omegas, axis=1)
-        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * self.omegas, axis=1)
 
         loss_task = torch.nn.MSELoss()
 
@@ -409,15 +415,19 @@ class TSFDQN(Agent):
             weight_sum_1 = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
             self.omegas.copy_(weight_sum_1) 
 
-        return loss
+        # Loss, phi_loss, psi_loss
+        return loss, l2, l1
 
-    def get_target_reward_mapper_error(self, r, loss, task_index, ts):
+    def get_target_reward_mapper_error(self, r, loss, phi_loss, psi_loss, task_index, target_loss_coefficient, ts):
         return_dict = {
             'task': task_index,
             # Total steps and ev_frequency
             'reward': r,
             'steps': ((500 * (self.total_training_steps // 1000)) + ts),
             'w_error': loss,
+            'psi_loss': psi_loss,
+            'phi_loss': phi_loss,
             #'w_error': torch.linalg.norm(self.test_tasks_weights[task_index] - task.get_w())
+            'target_loss_coefficient': target_loss_coefficient
             }
         return return_dict
