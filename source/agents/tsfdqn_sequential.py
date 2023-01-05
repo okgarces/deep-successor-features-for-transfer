@@ -80,7 +80,7 @@ class TSFDQN(Agent):
         return h_function
 
     def _init_omega(self, features_dim):
-        omega = torch.Tensor(features_dim).uniform_(0,1).to(self.device)
+        omega = torch.Tensor(features_dim).uniform_(0,1).to(self.device).requires_grad_(True)
         return omega
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
@@ -262,7 +262,7 @@ class TSFDQN(Agent):
         self.omegas = torch.vstack(self.omegas).unsqueeze(1)
         with torch.no_grad():
             self.omegas = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
-        self.omegas.requires_grad_(True)
+        self.omegas = torch.tensor(self.omegas).requires_grad_(True)
 
         # Initialize Target Reward Mappers and optimizer
         for test_task in test_tasks:
@@ -285,6 +285,8 @@ class TSFDQN(Agent):
             self.test_tasks_weights.append((w_approx, optim))
 
         return_data = []
+
+        print(f'Self Omegas after requires_grad {self.omegas}')
 
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
@@ -355,8 +357,6 @@ class TSFDQN(Agent):
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
 
-        self.omegas.requires_grad_(True)
-
         # Return Loss
         phi = task.features(s,a,s1)
 
@@ -405,8 +405,9 @@ class TSFDQN(Agent):
 
         # Sum_i omega_i = 1
         with torch.no_grad():
-            self.omegas.clamp_(0,1)
-            self.omegas = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
+            self.omegas.clamp_(0, 1) 
+            weight_sum_1 = (self.omegas / torch.sum(self.omegas, axis=0, keepdim=True)).nan_to_num(0)
+            self.omegas.copy_(weight_sum_1) 
 
         return loss
 
