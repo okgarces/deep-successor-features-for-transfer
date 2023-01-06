@@ -290,8 +290,6 @@ class TSFDQN(Agent):
 
         return_data = []
 
-        print(f'Self Omegas after requires_grad {self.omegas}')
-
         for _ in range(cycles_per_task):
             for index, (train_task, viewer) in enumerate(zip(train_tasks, viewers)):
                 self.set_active_training_task(index)
