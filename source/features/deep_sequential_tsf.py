@@ -127,12 +127,19 @@ class DeepTSF(SF):
         #self.all_output_model = Model(inputs=self.inputs, outputs=self.all_outputs)
         #self.all_output_model.compile('sgd', 'mse')  # dummy compile so Keras doesn't complain
         #
-
         params = [
-                {'params': model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': task_w.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': g_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': h_function.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': model.parameters(),
+                 'lr': self.hyperparameters['learning_rate_sf'],
+                 'weight_decay': self.hyperparameters['weight_decay_sf']},
+                {'params': task_w.parameters(),
+                 'lr': self.hyperparameters['learning_rate_w'],
+                 'weight_decay': self.hyperparameters['weight_decay_w']},
+                {'params': g_function.parameters(),
+                 'lr': self.hyperparameters['learning_rate_g'],
+                 'weight_decay': self.hyperparameters['weight_decay_g']},
+                {'params': h_function.parameters(),
+                 'lr': self.hyperparameters['learning_rate_h'],
+                 'weight_decay': self.hyperparameters['weight_decay_h']},
             ]
 
         optim = torch.optim.Adam(params)

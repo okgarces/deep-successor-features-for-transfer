@@ -5,7 +5,7 @@ from utils.torch import get_torch_device
 
 class SF:
     
-    def __init__(self, learning_rate_w, *args, use_true_reward=False, **kwargs):
+    def __init__(self, *args, use_true_reward=False, **kwargs):
         """
         Creates a new abstract successor feature representation.
         
@@ -17,8 +17,10 @@ class SF:
             whether or not to use the true reward weights from the environment, or learn them
             using gradient descent
         """
-        self.alpha_w = learning_rate_w
         self.use_true_reward = use_true_reward
+        self.hyperparameters = kwargs.get('hyperparameters', {})
+        self.alpha_w = self.hyperparameters.get('learning_rate_w')
+
         if len(args) != 0 or len(kwargs) != 0:
             print(self.__class__.__name__ + ' ignoring parameters ' + str(args) + ' and ' + str(kwargs))
 

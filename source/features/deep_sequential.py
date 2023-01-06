@@ -140,11 +140,11 @@ class DeepSF(SF):
 
         print(f'Initialize optimizer for SF and W {task}')
         params = [
-                {'params': model.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': w_approx.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': model.parameters(), 'lr': self.hyperparameters['learning_rate_sf'], 'weight_decay': self.hyperparameters['weight_decay_sf']},
+                {'params': w_approx.parameters(), 'lr': self.hyperparameters['learning_rate_w'], 'weight_decay': self.hyperparameters['weight_decay_w']},
             ]
         optim = torch.optim.Adam(params)
-        
+
         return (model, loss, optim), (target_model, None, None)
         
     def get_successor(self, state, policy_index):

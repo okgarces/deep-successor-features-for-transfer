@@ -32,6 +32,7 @@ class TSFDQN(Agent):
         self.buffer_handle = buffer_handle
         self.use_gpi = use_gpi
         self.test_epsilon = test_epsilon
+        self.hyperparameters = kwargs.get('hyperparameters', {})
 
         self.logger = get_logger_level()
         self.device = get_torch_device()
@@ -277,10 +278,13 @@ class TSFDQN(Agent):
             #w_approx = fit_w
             # Learning rate alpha (Weights)
             parameters = [
-                {'params': w_approx.parameters(), 'lr': 1e-3, 'weight_decay': 1e-2},
-                {'params': self.omegas,  'lr': 1e-3, 'weight_decay': 1e-2},
+                {'params': w_approx.parameters(),
+                 'lr': self.hyperparameters['learning_rate_w'],
+                 'weight_decay': self.hyperparameters['weight_decay_w']},
+                {'params': self.omegas,
+                 'lr': self.hyperparameters['learning_rate_omega'],
+                 'weight_decay': self.hyperparameters['weight_decay_omega']},
             ]
-
             optim = torch.optim.Adam(parameters)
             self.test_tasks_weights.append((w_approx, optim))
 

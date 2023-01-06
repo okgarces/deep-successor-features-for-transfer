@@ -35,6 +35,7 @@ class SFDQN(Agent):
         self.logger = get_logger_level()
         self.device = get_torch_device()
         self.test_tasks_weights = []
+        self.hyperparameters = kwargs.get('hyperparameters', {})
 
         # Sequential Successor Features
         self.buffers = []
@@ -141,7 +142,11 @@ class SFDQN(Agent):
                 w_approx.weight = torch.nn.Parameter(fit_w)
 
             # LR 1e-3 and wd 1e-2
-            optim = torch.optim.Adam(w_approx.parameters(), lr=1e-3, weight_decay=1e-2)
+            w_hyperparams = {
+                    'params': w_approx.parameters(),
+                    'lr': self.hyperparameters['learning_rate_w'],
+                    'weight_decay': self.hyperparameters['weight_decay_w']},
+            optim = torch.optim.Adam(w_hyperparams)
             self.test_tasks_weights.append((w_approx, optim))
             
         # train each one

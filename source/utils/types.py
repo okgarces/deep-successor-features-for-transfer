@@ -3,4 +3,4 @@ from torch.optim import Optimizer
 from torch.nn import Module
 from typing import Tuple
 
-ModelTuple = Tuple[Module, Loss, Optimizer]
+ModelTuple = Tuple[Module, Loss, Optimizer|None]

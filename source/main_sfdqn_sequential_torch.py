@@ -50,7 +50,6 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
     # Layers settings
     first_layer_neurons = model_params['n_neurons'][0]
     last_layer_neurons = model_params['n_neurons'][-1]
-    learning_rate = model_params['learning_rate']
 
     # Input Layer
     input_layer = torch.nn.Linear(num_inputs, first_layer_neurons)
@@ -70,11 +69,9 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
     layers['layer_unflatten'] = unflatten_layer
 
     model = torch.nn.Sequential(layers).to(device)
-
-    optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss = torch.nn.MSELoss().to(device)
 
-    return model, loss, optim
+    return model, loss, None
 
 def replay_buffer_handle():
     return ReplayBuffer(sfdqn_params['buffer_params'])
