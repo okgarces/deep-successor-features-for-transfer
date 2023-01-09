@@ -123,7 +123,7 @@ class ReacherRobot(MJCFBasedRobot):
     TARG_LIMIT = 0.27
 
     def __init__(self, target, torque_multiplier):
-        MJCFBasedRobot.__init__(self, 'reacher_dissimilar.xml', 'body0', action_dim=2, obs_dim=4)
+        MJCFBasedRobot.__init__(self, 'reacher.xml', 'body0', action_dim=2, obs_dim=4)
         self.target_pos = target
         self.torque_multiplier = torque_multiplier
 
@@ -143,7 +143,6 @@ class ReacherRobot(MJCFBasedRobot):
         # Initial Reacher has torque multiplier 0.05
         self.central_joint.set_motor_torque(self.torque_multiplier * float(np.clip(a[0], -1, +1)))
         self.elbow_joint.set_motor_torque(self.torque_multiplier * float(np.clip(a[1], -1, +1)))
-        print(f'Target {self.target_pos}, Torque Multiplier {self.torque_multiplier}')
 
     def calc_state(self):
         theta, self.theta_dot = self.central_joint.current_relative_position()
