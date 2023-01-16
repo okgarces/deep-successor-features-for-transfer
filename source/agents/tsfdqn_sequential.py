@@ -178,22 +178,27 @@ class TSFDQN(Agent):
         # log gradients this is only a way to track gradients from time to time
         if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
             print(f'########### BEGIN #################')
-            print(f'Affine transformed states {affine_transformed_states}')
-            print(f'h function {self.h_function.weight}')
-            print(f'g function {g_function.weight}')
+            print(f'Affine transformed states {affine_transformed_states} task {policy_index}')
+            print(f'g functions values states {transformed_state} task {policy_index}')
+            print(f'g functions values next states {transformed_next_state} task {policy_index}')
+            print(f'phis values {phis} task {policy_index}')
             print(f'Policy Index {policy_index}')
             print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
             for params in psi_model.parameters():
                 print(f'Gradients of Psi {params.grad}')
+                print(f'Psi weights {params.data}')
 
             for params in g_function.parameters():
                 print(f'Gradients of G function {params.grad}')
+                print(f'G function weights {params.data}')
 
             for params in self.h_function.parameters():
                 print(f'Gradients of H function {params.grad}')
+                print(f'H function weights {params.data}')
 
             for params in task_w.parameters():
                 print(f'Gradients of W {params.grad}')
+                print(f'W weights {params.data}')
 
             for params in target_psi_model.parameters():
                 print(f'Gradients of Psi Target {params.grad}')
