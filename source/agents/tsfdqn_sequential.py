@@ -158,10 +158,12 @@ class TSFDQN(Agent):
         transformed_phis = affine_transformed_states * phis
 
         with torch.no_grad():
-            targets = transformed_phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
+            next_psis = target_psi_model(next_states)[indices, next_actions,:]
         
+        targets = transformed_phis + gammas * next_psis
         # train the SF network
         merge_current_target_psi = current_psi.clone()
+        # TODO Add transformed_phis to be part of the gradient calculation
         merge_current_target_psi[indices, actions,:] = targets
         # psi_model.train_on_batch(states, current_psi)
 
@@ -421,8 +423,7 @@ class TSFDQN(Agent):
 
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-            next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * omegas, axis=1)
-
+        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * omegas, axis=1)
         tsf = torch.sum(successor_features * omegas, axis=1)
 
         loss_task = torch.nn.MSELoss()
@@ -442,7 +443,14 @@ class TSFDQN(Agent):
         with torch.no_grad():
             omegas.clamp_(0, 1) 
             weight_sum_1 = (omegas / torch.sum(omegas, axis=0, keepdim=True)).nan_to_num(0)
-            omegas.copy_(weight_sum_1) 
+            omegas.copy_(weight_sum_1)
+
+        if(self.total_training_steps % 1000 == 0 and random.randint(1, 1000 ) < 10):
+            print(f'########### BEGIN TARGET TASKS #################')
+            print(f'Target Task Index {task}')
+            print(f'Target Task {task} Omegas Gradients {omegas.grad}')
+            print(f'Target Task {task} Weights {w_approx.weight}')
+            print(f'########### END TARGET TASKS #################')
 
         # Loss, phi_loss, psi_loss
         return loss, l2, l1
