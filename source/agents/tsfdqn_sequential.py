@@ -95,8 +95,8 @@ class TSFDQN(Agent):
 
         return h_function
 
-    def _init_omega(self, features_dim):
-        omega = torch.Tensor(features_dim).uniform_(0,1).to(self.device).requires_grad_(True)
+    def _init_omega(self, num_source_tasks):
+        omega = torch.Tensor(1, num_source_tasks, 1, 1).uniform_(0,1).to(self.device).requires_grad_(True)
         return omega
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
@@ -159,11 +159,10 @@ class TSFDQN(Agent):
 
         with torch.no_grad():
             next_psis = target_psi_model(next_states)[indices, next_actions,:]
-        
-        targets = transformed_phis + gammas * next_psis
+            targets = transformed_phis + gammas * next_psis
+
         # train the SF network
         merge_current_target_psi = current_psi.clone()
-        # TODO Add transformed_phis to be part of the gradient calculation
         merge_current_target_psi[indices, actions,:] = targets
         # psi_model.train_on_batch(states, current_psi)
 
@@ -237,7 +236,6 @@ class TSFDQN(Agent):
         if self.h_function is None:
             self.h_function = self._init_h_function(task.feature_dim())
 
-        self.omegas_per_source_task.append(self._init_omega(task.feature_dim()))
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
 
@@ -282,18 +280,17 @@ class TSFDQN(Agent):
 
         # train each one
         # Regularize sum w_i = 1
-        # Unsqueeze to have [n_tasks, n_actions, n_features]
+        # Unsqueeze to have [n_batch, n_tasks, n_actions, n_features]
         # Initialize Omegas
-        omegas_temp = torch.vstack(self.omegas_per_source_task).unsqueeze(1)
+        omegas_temp = self._init_omega(len(train_tasks))
         with torch.no_grad():
-            omegas_temp = (omegas_temp / torch.sum(omegas_temp, axis=0, keepdim=True)).nan_to_num(0)
+            omegas_temp = (omegas_temp / torch.sum(omegas_temp, axis=1, keepdim=True))
         omegas_temp = torch.tensor(omegas_temp).requires_grad_(True)
-
-        print(f'Omegas {omegas_temp}')
 
         # Initialize Target Reward Mappers and optimizer
         for test_task in test_tasks:
             omegas_target_task = omegas_temp.clone().detach().requires_grad_(True)
+
             fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
             w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
@@ -346,8 +343,9 @@ class TSFDQN(Agent):
             if random.random() <= self.test_epsilon:
                 a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
             else:
+                normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
                 successor_features = self.sf.get_successors(s_enc)
-                tsf = torch.sum(successor_features * omegas, axis=1)
+                tsf = torch.sum(successor_features * normalized_omegas, axis=1)
 
                 q = w(tsf)
                 # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
@@ -400,6 +398,8 @@ class TSFDQN(Agent):
         t_states = []
         t_next_states = []
 
+        normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+
         with torch.no_grad():
             for g in self.g_functions:
                 state = g(s)
@@ -411,8 +411,8 @@ class TSFDQN(Agent):
             t_states = torch.vstack(t_states).unsqueeze(1)
             t_next_states = torch.vstack(t_next_states).unsqueeze(1)
 
-        weighted_states = torch.sum(t_states * omegas, axis=0)
-        weighted_next_states = torch.sum(t_next_states * omegas, axis=0)
+        weighted_states = torch.sum(t_states * normalized_omegas, axis=1)
+        weighted_next_states = torch.sum(t_next_states * normalized_omegas, axis=1)
 
         with torch.no_grad():
             affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
@@ -422,9 +422,9 @@ class TSFDQN(Agent):
             next_successor_features = self.sf.get_next_successors(s)
 
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+            next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * normalized_omegas, axis=1)
 
-        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * omegas, axis=1)
-        tsf = torch.sum(successor_features * omegas, axis=1)
+        tsf = torch.sum(successor_features * normalized_omegas, axis=1)
 
         loss_task = torch.nn.MSELoss()
 
@@ -441,9 +441,8 @@ class TSFDQN(Agent):
 
         # Sum_i omega_i = 1
         with torch.no_grad():
-            omegas.clamp_(0, 1) 
-            weight_sum_1 = (omegas / torch.sum(omegas, axis=0, keepdim=True)).nan_to_num(0)
-            omegas.copy_(weight_sum_1)
+            epsilon = 1e-7
+            omegas.clamp_(epsilon) 
 
         if(self.total_training_steps % 1000 == 0 and random.randint(1, 1000 ) < 10):
             print(f'########### BEGIN TARGET TASKS #################')
