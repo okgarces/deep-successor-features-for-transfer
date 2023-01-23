@@ -91,8 +91,8 @@ class ReacherDissimilar(Task):
 
 class ReacherBulletEnv(BaseBulletEnv):
 
-    def __init__(self, target, torque_multiplier):
-        self.robot = ReacherRobot(target, torque_multiplier)
+    def __init__(self, target, torque_multiplier, config_filename):
+        self.robot = ReacherRobot(target, torque_multiplier, config_filename)
         BaseBulletEnv.__init__(self, self.robot)
 
     def create_single_player_scene(self, bullet_client):
@@ -122,8 +122,8 @@ class ReacherBulletEnv(BaseBulletEnv):
 class ReacherRobot(MJCFBasedRobot):
     TARG_LIMIT = 0.27
 
-    def __init__(self, target, torque_multiplier):
-        MJCFBasedRobot.__init__(self, 'reacher.xml', 'body0', action_dim=2, obs_dim=4)
+    def __init__(self, target, torque_multiplier, config_filename):
+        MJCFBasedRobot.__init__(self, config_filename, 'body0', action_dim=2, obs_dim=4)
         self.target_pos = target
         self.torque_multiplier = torque_multiplier
 
