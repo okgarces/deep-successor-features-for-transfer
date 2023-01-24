@@ -70,9 +70,9 @@ class TSFDQN(Agent):
             self.c = c
             return q[:, c,:]
 
-    def _init_g_function(self, states_dim, features_dim):
+    def _init_g_function(self, states_dim, output_dim):
         # g : |S| -> |d|, d features dimension
-        g_function = torch.nn.Linear(states_dim, features_dim, bias=True, device=self.device)
+        g_function = torch.nn.Linear(states_dim, output_dim, bias=True, device=self.device)
         #with torch.no_grad():
         #    # 0.001 and 0.01 got from analysis between the max values of g_function [-220, 200] and phi prefixed is [-1.5, 1]
         #    weights = torch.eye(features_dim, states_dim).to(self.device).requires_grad_(False)
@@ -81,11 +81,11 @@ class TSFDQN(Agent):
         #    g_function.bias = torch.nn.Parameter(bias, requires_grad=False)
         return g_function
 
-    def _init_h_function(self, features_dim):
+    def _init_h_function(self, input_dim, features_dim):
         # TODO Remove weights clamp and initial weights
         # h : |d| -> |d|, d features dimension
         # This affine transformation
-        h_function = torch.nn.Linear(features_dim, features_dim, bias=True, device=self.device)
+        h_function = torch.nn.Linear(input_dim, features_dim, bias=True, device=self.device)
         #with torch.no_grad():
         #    # 0.001 and 0.01 got from analysis between the max values of g_function [-220, 200] and phi prefixed is [-1.5, 1]
         #    weights = torch.Tensor(features_dim, features_dim).uniform_(0.001,0.01).to(self.device).requires_grad_(False)
@@ -230,11 +230,13 @@ class TSFDQN(Agent):
 
         # Transformed Successor Feature
         # Encode Dim encapsulates the state encoding dimension
-        g_function = self._init_g_function(task.encode_dim(), task.feature_dim())
+        g_h_function_dims = self.hyperparameters.get('g_h_function_dims')
+
+        g_function = self._init_g_function(task.encode_dim(), g_h_function_dims)
         self.g_functions.append(g_function)
 
         if self.h_function is None:
-            self.h_function = self._init_h_function(task.feature_dim())
+            self.h_function = self._init_h_function(g_h_function_dims, task.feature_dim())
 
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
