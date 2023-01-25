@@ -11,13 +11,16 @@ from utils.torch import get_torch_device
 
 class ReacherDissimilar(Task):
     
-    def __init__(self, target_positions, task_index, torque_multipliers, include_target_in_state=False):
+    def __init__(self, target_positions, task_index, torque_multipliers, filenames_mjfc, include_target_in_state=False):
         self.target_positions = target_positions
         self.task_index = task_index
         self.target_pos = target_positions[task_index]
         self.include_target_in_state = include_target_in_state
         self.torque_multipliers = torque_multipliers
-        self.env = ReacherBulletEnv(self.target_pos, self.torque_multipliers[task_index])
+        self.filenames_mjfc = filenames_mjfc
+        self.env = ReacherBulletEnv(self.target_pos, self.torque_multipliers[task_index], self.filenames_mjfc[task_index])
+
+        print(f'Task_Index {self.task_index}, filename {self.filenames_mjfc[self.task_index]}, torque {self.torque_multipliers[self.task_index]}')
         
         # make the action lookup from integer to real action
         actions = [-1., 0., 1.]
