@@ -28,11 +28,11 @@ goals = task_params['train_targets']
 test_goals = task_params['test_targets']
 train_torque_multipliers = task_params['train_torque_multipliers']
 test_torque_multipliers = task_params['test_torque_multipliers']
-train_filename_mjfc = task_params['train_filename_mjfc']
-test_filename_mjfc = task_params['test_filename_mjfc']
+train_filename_mjcf = task_params['train_filename_mjcf']
+test_filename_mjcf = task_params['test_filename_mjcf']
 all_goals = goals + test_goals
 all_torque_multipliers = train_torque_multipliers + test_torque_multipliers
-all_filename_mjfc = train_filename_mjfc + test_filename_mjfc
+all_filename_mjfc = train_filename_mjcf + test_filename_mjcf
     
 agent_params = config_params['AGENT']
 sfdqn_params = config_params['SFDQN']

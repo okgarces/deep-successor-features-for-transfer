@@ -27,8 +27,11 @@ goals = task_params['train_targets']
 test_goals = task_params['test_targets']
 train_torque_multipliers = task_params['train_torque_multipliers']
 test_torque_multipliers = task_params['test_torque_multipliers']
+train_filename_mjcf = task_params['train_filename_mjcf']
+test_filename_mjcf = task_params['test_filename_mjcf']
 all_goals = goals + test_goals
 all_torque_multipliers = train_torque_multipliers + test_torque_multipliers
+all_filename_mjfc = train_filename_mjcf + test_filename_mjcf
 
 agent_params = config_params['AGENT']
 sfdqn_params = config_params['SFDQN']
@@ -39,8 +42,8 @@ logger = set_logger_level(use_logger=use_logger)
 
 # tasks
 def generate_tasks(include_target):
-    train_tasks = [ReacherDissimilar(all_goals, i, all_torque_multipliers, include_target) for i in range(len(goals))]
-    test_tasks = [ReacherDissimilar(all_goals, i + len(goals), all_torque_multipliers, include_target) for i in range(len(test_goals))]
+    train_tasks = [ReacherDissimilar(all_goals, i, all_torque_multipliers, all_filename_mjfc, include_target) for i in range(len(goals))]
+    test_tasks = [ReacherDissimilar(all_goals, i + len(goals), all_torque_multipliers, all_filename_mjfc, include_target) for i in range(len(test_goals))]
     return train_tasks, test_tasks
 
 
