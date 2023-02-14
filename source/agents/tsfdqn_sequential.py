@@ -384,7 +384,8 @@ class TSFDQN(Agent):
                 break
 
         # Log accum loss for T
-        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, 1, self.T))
+        beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
 
         return R
 
@@ -432,10 +433,12 @@ class TSFDQN(Agent):
 
         r_fit = w_approx(transformed_phi)
 
+        beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
+
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
 
-        loss = l1 + l2
+        loss = l1 + beta_loss_coefficient * l2
 
         optim.zero_grad()
         loss.backward()
