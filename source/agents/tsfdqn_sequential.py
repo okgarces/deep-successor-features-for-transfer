@@ -433,12 +433,16 @@ class TSFDQN(Agent):
 
         r_fit = w_approx(transformed_phi)
 
-        beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
+        # Hyperparameters and L1 Regularizations
+        beta_loss_coefficient = torch.tensor(self.hyperparameters['beta_loss_coefficient'])
+        lasso_coefficient = torch.tensor(self.hyperparameters['omegas_l1_coefficient'])
+        # L1 Norm
+        lasso_regularization = torch.norm(omegas, 1)
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
 
-        loss = l1 + beta_loss_coefficient * l2
+        loss = l1 + (beta_loss_coefficient * l2) + (lasso_coefficient * lasso_regularization)
 
         optim.zero_grad()
         loss.backward()
