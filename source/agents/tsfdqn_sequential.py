@@ -112,7 +112,8 @@ class TSFDQN(Agent):
         
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss = losses
-                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [1], self.total_training_steps)
+                
+                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [self.hyperparameters['beta_loss_coefficient']], self.total_training_steps)
 
         # Print weights for Reward Mapper
         if self.total_training_steps % 1000 == 0:
@@ -169,11 +170,12 @@ class TSFDQN(Agent):
         optim.zero_grad()
 
         r_fit = task_w(transformed_phis)
+        beta_loss_coefficient = torch.tensor(self.hyperparameters['beta_loss_coefficient'])
 
         l1 = psi_loss(current_psi, merge_current_target_psi)
         l2 = psi_loss(r_fit, rs)
-
-        loss = l1 + l2
+        
+        loss = l1 + (beta_loss_coefficient * l2)
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
