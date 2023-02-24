@@ -20,6 +20,7 @@ config_params = parse_config_file('reacher.cfg')
 gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
 use_gpu= gen_params.get('use_gpu', False) # Default GPU False
+gpu_device_index = gen_params.get('gpu_device_index', 0) # Default GPU False
 use_logger= gen_params.get('use_logger', False) # Default GPU False
 n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default GPU False
 
@@ -32,7 +33,7 @@ agent_params = config_params['AGENT']
 sfdqn_params = config_params['SFDQN']
 
 # Config GPU for Torch and logger
-device = set_torch_device(use_gpu=use_gpu)
+device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
 logger = set_logger_level(use_logger=use_logger)
 
 # tasks

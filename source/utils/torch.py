@@ -5,11 +5,11 @@ import os
 
 device = None 
 
-def set_torch_device(use_gpu = False):
+def set_torch_device(use_gpu = False, gpu_device_index = 0):
     global device
     if device is None:
         cuda_available = use_gpu and torch.cuda.is_available()
-        device = torch.device('cuda' if cuda_available else 'cpu')
+        device = torch.device(f'cuda:{gpu_device_index}' if cuda_available else 'cpu')
         print(f"Using {device}")
     return device
 
