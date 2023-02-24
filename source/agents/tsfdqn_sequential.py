@@ -389,6 +389,9 @@ class TSFDQN(Agent):
         beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
         self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
 
+        # Fix it seems omegas are being cached
+        self.omegas[test_index] = omegas
+
         return R
 
     def update_test_reward_mapper(self, w_approx, omegas, optim, task, r, s, a, s1):
