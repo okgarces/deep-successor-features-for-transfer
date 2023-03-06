@@ -314,7 +314,13 @@ class TSFDQN(Agent):
                  'weight_decay': self.hyperparameters['weight_decay_omega']},
             ]
             optim = torch.optim.Adam(parameters)
-            self.test_tasks_weights.append((w_approx, optim))
+
+            no_op_lambda = lambda epoch: 1 ** epoch
+            lambda_omegas_lr = lambda epoch: (1 - self.hyperparameters['learning_rate_omega_decay']) ** epoch
+
+            # This scheduler manages the lambda according to parameter group
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optim, [no_op_lambda, lambda_omegas_lr])
+            self.test_tasks_weights.append((w_approx, optim, scheduler))
             self.omegas.append(omegas_target_task)
 
         return_data = []
@@ -359,7 +365,7 @@ class TSFDQN(Agent):
             
     def test_agent(self, task, test_index):
         R = 0.0
-        w, optim = self.test_tasks_weights[test_index]
+        w, optim, scheduler = self.test_tasks_weights[test_index]
         omegas = self.omegas[test_index]
         s = task.initialize()
         s_enc = self.encoding(s)
@@ -368,7 +374,7 @@ class TSFDQN(Agent):
         total_phi_loss = 0
         total_psi_loss = 0
 
-        for _ in range(self.T):
+        for target_ev_step in range(self.T):
             a = self.get_test_action(s_enc, w, omegas)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
@@ -377,6 +383,10 @@ class TSFDQN(Agent):
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
+
+            # Index 1 is for omegas
+            self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps + target_ev_step))
+            scheduler.step()
 
             # Update states
             s, s_enc = s1, s1_enc

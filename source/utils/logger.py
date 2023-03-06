@@ -82,6 +82,9 @@ class LoggerBase(object):
         self.log_total_loss(total_loss, training_steps)
         self.log_loss_coefficient(loss_coefficient, training_steps)
 
+    def log_omegas_learning_rate(self, learning_rate, task_id, total_steps):
+        self.log_scalar(f'Target_Tasks/Omegas_Learning_Rate/Ev_Steps/task_{task_id + 1}', learning_rate, total_steps)
+ 
     def finalize(self):
         raise NotImplemented()
 
