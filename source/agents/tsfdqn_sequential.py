@@ -160,11 +160,11 @@ class TSFDQN(Agent):
 
         with torch.no_grad():
             next_psis = target_psi_model(next_states)[indices, next_actions,:]
-            targets = gammas * next_psis
+            targets = transformed_phis + gammas * next_psis
 
         # train the SF network
         merge_current_target_psi = current_psi.clone()
-        merge_current_target_psi[indices, actions,:] = transformed_phis + targets
+        merge_current_target_psi[indices, actions,:] = targets
         # psi_model.train_on_batch(states, current_psi)
 
         optim.zero_grad()
@@ -458,7 +458,7 @@ class TSFDQN(Agent):
 
         with torch.no_grad():
             successor_features = self.sf.get_successors(s)
-            next_successor_features = self.sf.get_next_successors(s)
+            next_successor_features = self.sf.get_next_successors(s1)
 
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
             next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * normalized_omegas, axis=1)
