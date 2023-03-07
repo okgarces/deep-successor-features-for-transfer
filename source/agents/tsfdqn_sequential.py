@@ -181,27 +181,45 @@ class TSFDQN(Agent):
         # log gradients this is only a way to track gradients from time to time
         if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
             print(f'########### BEGIN #################')
-            print(f'Affine transformed states {affine_transformed_states} task {policy_index}')
-            print(f'g functions values states {transformed_state} task {policy_index}')
-            print(f'g functions values next states {transformed_next_state} task {policy_index}')
-            print(f'phis values {phis} task {policy_index}')
+            print(f'Affine transformed states {torch.norm(affine_transformed_states, dim=1)} task {policy_index}')
+            print(f'g functions values states {torch.norm(transformed_state, dim=1)} task {policy_index}')
+            print(f'g functions values next states {torch.norm(transformed_next_state, dim=1)} task {policy_index}')
+            print(f'phis values {torch.norm(phis, dim=1)} task {policy_index}')
             print(f'Policy Index {policy_index}')
             print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
+
+            accum_grads = 0
+            accum_weights = 0
             for params in psi_model.parameters():
-                print(f'Gradients of Psi {params.grad}')
-                print(f'Psi weights {params.data}')
+                accum_grads += torch.norm(params.grad)
+                accum_weights += torch.norm(params.data)
+            print(f'Gradients of Psi {accum_grads}')
+            print(f'Psi weights {accum_weights}')
 
+            accum_grads = 0
+            accum_weights = 0
             for params in g_function.parameters():
-                print(f'Gradients of G function {params.grad}')
-                print(f'G function weights {params.data}')
+                accum_grads += torch.norm(params.grad)
+                accum_weights += torch.norm(params.data)
+            print(f'Gradients of G function {accum_grads}')
+            print(f'G function weights {accum_weights}')
 
+            accum_grads = 0
+            accum_weights = 0
             for params in self.h_function.parameters():
-                print(f'Gradients of H function {params.grad}')
-                print(f'H function weights {params.data}')
+                accum_grads += torch.norm(params.grad)
+                accum_weights += torch.norm(params.data)
+            print(f'Gradients of H function {accum_grads}')
+            print(f'H function weights {accum_weights}')
 
+            accum_grads = 0
+            accum_weights = 0
             for params in task_w.parameters():
-                print(f'Gradients of W {params.grad}')
+                accum_grads += torch.norm(params.grad)
+                accum_weights += torch.norm(params.data)
                 print(f'W weights {params.data}')
+            print(f'Gradients of W {accum_grads}')
+            print(f'W weights {accum_weights}')
 
             for params in target_psi_model.parameters():
                 print(f'Gradients of Psi Target {params.grad}')
@@ -385,7 +403,6 @@ class TSFDQN(Agent):
             total_psi_loss += psi_loss.item()
 
             # Index 1 is for omegas
-            self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps + target_ev_step))
             scheduler.step()
 
             # Update states
@@ -395,9 +412,11 @@ class TSFDQN(Agent):
             if done:
                 break
 
-        # Log accum loss for T
-        beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
-        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
+        # Log accum loss for T from in a random way
+        if(random.randint(1, 1000) < 10):
+            beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
+            self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
+            self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps))
 
         # Fix it seems omegas are being cached
         self.omegas[test_index] = omegas
@@ -470,7 +489,7 @@ class TSFDQN(Agent):
             epsilon = 1e-7
             omegas.clamp_(epsilon) 
 
-        if(self.total_training_steps % 1000 == 0 and random.randint(1, 1000 ) < 10):
+        if(self.total_training_steps % 1000 == 0 and random.randint(1, 1000) < 10):
             print(f'########### BEGIN TARGET TASKS #################')
             print(f'Target Task Index {task}')
             print(f'Target Task {task} Omegas Gradients {omegas.grad}')
