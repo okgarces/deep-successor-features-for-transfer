@@ -160,11 +160,11 @@ class TSFDQN(Agent):
 
         with torch.no_grad():
             next_psis = target_psi_model(next_states)[indices, next_actions,:]
-            targets = transformed_phis + gammas * next_psis
+            targets = gammas * next_psis
 
         # train the SF network
         merge_current_target_psi = current_psi.clone()
-        merge_current_target_psi[indices, actions,:] = targets
+        merge_current_target_psi[indices, actions,:] = transformed_phis + targets
         # psi_model.train_on_batch(states, current_psi)
 
         optim.zero_grad()
