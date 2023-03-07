@@ -412,6 +412,9 @@ class TSFDQN(Agent):
         # Return Loss
         phi = task.features(s,a,s1)
 
+        # h function eval
+        self.h_function.eval()
+
         # Transformed States
         t_states = []
         t_next_states = []
@@ -431,11 +434,10 @@ class TSFDQN(Agent):
 
         weighted_states = torch.sum(t_states * normalized_omegas, axis=1)
         weighted_next_states = torch.sum(t_next_states * normalized_omegas, axis=1)
+        affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
+        transformed_phi = phi * affine_states.squeeze(0)
 
         with torch.no_grad():
-            affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
-            transformed_phi = phi * affine_states.squeeze(0)
-
             successor_features = self.sf.get_successors(s)
             next_successor_features = self.sf.get_next_successors(s)
 
@@ -473,8 +475,11 @@ class TSFDQN(Agent):
             print(f'Target Task Index {task}')
             print(f'Target Task {task} Omegas Gradients {omegas.grad}')
             print(f'Target Task {task} Weights {w_approx.weight}')
+            print(f'Target Task {task} Weights Gradients {w_approx.weight.grad}')
             print(f'########### END TARGET TASKS #################')
 
+        # h function train
+        self.h_function.train()
         # Loss, phi_loss, psi_loss
         return loss, l2, l1
 
