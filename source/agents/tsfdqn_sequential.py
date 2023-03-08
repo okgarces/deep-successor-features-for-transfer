@@ -413,7 +413,7 @@ class TSFDQN(Agent):
                 break
 
         # Log accum loss for T from in a random way
-        if(random.randint(1, 1000) < 10):
+        if(self.total_training_steps % 5000 == 0):
             beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
             self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
             self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps))
