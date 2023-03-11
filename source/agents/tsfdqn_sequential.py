@@ -137,14 +137,15 @@ class TSFDQN(Agent):
         task_w = self.sf.fit_w[policy_index]
          
         # next actions come from current Successor Feature
-        if use_gpi:
-            q1, _ = self.sf.GPI(next_states, policy_index)
-            next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
-        else:
-            sf = self.sf.get_successor(next_states, policy_index)
-            q1 = task_w(sf)
-            # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
-            next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
+        with torch.no_grad():
+            if use_gpi:
+                q1, _ = self.sf.GPI(next_states, policy_index)
+                next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
+            else:
+                sf = self.sf.get_successor(next_states, policy_index)
+                q1 = task_w(sf)
+                # Do not forget: argmax according to actions, and squeeze in axis according to get n_batch
+                next_actions = torch.squeeze(torch.argmax(q1, axis=1), axis=1)
 
         # compute the targets and TD errors
         psi_tuple, target_psi_tuple = self.sf.psi[policy_index]
@@ -158,7 +159,9 @@ class TSFDQN(Agent):
         affine_transformed_states = self.h_function(transformed_state) + self.h_function(transformed_next_state)
         transformed_phis = affine_transformed_states * phis
 
-        next_psis = target_psi_model(next_states)[indices, next_actions,:]
+        with torch.no_grad():
+            next_psis = target_psi_model(next_states)[indices, next_actions,:]
+
         targets = transformed_phis + gammas * next_psis
 
         # train the SF network
@@ -223,7 +226,8 @@ class TSFDQN(Agent):
             accum_grads = 0
             accum_weights = 0
             for params in target_psi_model.parameters():
-                accum_grads += torch.norm(params.grad)
+                if params.grad is not None:
+                    accum_grads += torch.norm(params.grad)
                 accum_weights += torch.norm(params.data)
             print(f'Gradients of Psi Target {accum_grads}')
             print(f'Weights of Psi Target {accum_weights}')
@@ -400,8 +404,9 @@ class TSFDQN(Agent):
             a = self.get_test_action(s_enc, w, omegas)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
+            a1 = self.get_test_action(s1_enc, w, omegas)
 
-            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, r, s_enc, a, s1_enc)
+            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, r, s_enc, a, s1_enc, a1)
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
@@ -427,7 +432,7 @@ class TSFDQN(Agent):
 
         return R
 
-    def update_test_reward_mapper(self, w_approx, omegas, optim, task, r, s, a, s1):
+    def update_test_reward_mapper(self, w_approx, omegas, optim, task, r, s, a, s1, a1):
 
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
@@ -463,12 +468,11 @@ class TSFDQN(Agent):
         with torch.no_grad():
             successor_features = self.sf.get_successors(s)
             next_successor_features = self.sf.get_next_successors(s1)
-
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * normalized_omegas, axis=1)
-        tsf = torch.sum(successor_features * normalized_omegas, axis=1)
+        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
 
+        tsf = torch.sum(successor_features * normalized_omegas, axis=1)[:, a ,:]
         loss_task = torch.nn.MSELoss()
 
         r_fit = w_approx(transformed_phi)
