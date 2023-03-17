@@ -1,6 +1,4 @@
 # -*- coding: UTF-8 -*-  
-import matplotlib.pyplot as plt
-
 from agents.tsfdqn_sequential import TSFDQN
 from agents.buffer_tsf_sequential import ReplayBuffer
 from features.deep_sequential_tsf import DeepTSF
@@ -20,6 +18,7 @@ config_params = parse_config_file('reacher_dissimilar.cfg')
 gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
 use_gpu= gen_params.get('use_gpu', False) # Default GPU False
+gpu_device_index = gen_params.get('gpu_device_index', 0) # Default GPU False
 use_logger= gen_params.get('use_logger', False) # Default GPU False
 n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default GPU False
 
@@ -38,7 +37,7 @@ agent_params = config_params['AGENT']
 sfdqn_params = config_params['SFDQN']
 
 # Config GPU for Torch and logger
-device = set_torch_device(use_gpu=use_gpu)
+device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
 logger = set_logger_level(use_logger=use_logger)
 
 # tasks
@@ -87,7 +86,7 @@ def replay_buffer_handle():
 def train():
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
-    print('building TSFDQN Sequential')
+    print('building TSFDQN Sequential Dissimilar')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
     sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle,
                   **sfdqn_params, **agent_params)
@@ -96,6 +95,6 @@ def train():
     print('training TSFDQN Sequential')
     train_tasks, test_tasks = generate_tasks(False)
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
-    print('End Training TSFDQN Sequential')
+    print('End Training TSFDQN Sequential Dissimilar')
 
 train()

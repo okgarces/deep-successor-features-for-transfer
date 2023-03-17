@@ -1,6 +1,4 @@
 # -*- coding: UTF-8 -*-  
-import matplotlib.pyplot as plt
-
 from agents.tsfdqn_sequential import TSFDQN
 from agents.buffer_tsf_sequential import ReplayBuffer
 from features.deep_sequential_tsf import DeepTSF
