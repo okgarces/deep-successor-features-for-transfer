@@ -81,6 +81,7 @@ def train():
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
     print('building TSFDQN Sequential')
+    print(f'PyTorch Seed {torch.seed()}')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
     sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle,
                   **sfdqn_params, **agent_params)
