@@ -183,10 +183,10 @@ class TSFDQN(Agent):
         # log gradients this is only a way to track gradients from time to time
         if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
             print(f'########### BEGIN #################')
-            print(f'Affine transformed states {torch.norm(affine_transformed_states, dim=1)} task {policy_index}')
-            print(f'g functions values states {torch.norm(transformed_state, dim=1)} task {policy_index}')
-            print(f'g functions values next states {torch.norm(transformed_next_state, dim=1)} task {policy_index}')
-            print(f'phis values {torch.norm(phis, dim=1)} task {policy_index}')
+            print(f'Affine transformed states {torch.norm(affine_transformed_states, dim=0)} task {policy_index}')
+            print(f'g functions values states {torch.norm(transformed_state, dim=0)} task {policy_index}')
+            print(f'g functions values next states {torch.norm(transformed_next_state, dim=0)} task {policy_index}')
+            print(f'phis values {torch.norm(phis, dim=0)} task {policy_index}')
             print(f'Policy Index {policy_index}')
             print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
 
@@ -440,6 +440,8 @@ class TSFDQN(Agent):
         # Return Loss
         phi = task.features(s,a,s1)
 
+        print(f'Phi values {phi.shape}')
+
         # h function eval
         self.h_function.eval()
 
@@ -503,6 +505,10 @@ class TSFDQN(Agent):
             print(f'Target Task {task} Omegas Gradients {omegas.grad}')
             print(f'Target Task {task} Weights {w_approx.weight}')
             print(f'Target Task {task} Weights Gradients {w_approx.weight.grad}')
+            print(f'Target Task {task} affine states {affine_states.squeeze(0)}')
+            print(f'Target Task {task} phi values {phi}')
+            print(f'Target Task {task} transformed state {weighted_states}')
+
             print(f'########### END TARGET TASKS #################')
 
         # h function train
