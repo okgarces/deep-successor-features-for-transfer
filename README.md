@@ -1,3 +1,9 @@
+# Transformed Successor Features
+
+This code is a fork of Gimelfarb repository. Has the following changes:
+1. Use PyTorch instead of Tensorflow.
+2. Implement Transformed Successor Features.
+
 # successor-features-for-transfer
 A reusable framework and independent implementation for successor features (SF) for transfer in (deep) reinforcement learning using keras, based on [1].
 
