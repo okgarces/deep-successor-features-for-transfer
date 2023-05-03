@@ -3,9 +3,10 @@ from features.successor import SF
 from utils.torch import get_torch_device, update_models_weights
 
 import torch
+import numpy as np
 
 
-class DeepSF(SF):
+class DeepSF_TSF_PHI(SF):
     """
     A successor feature representation implemented using Keras. Accepts a wide variety of neural networks as
     function approximators.
@@ -26,7 +27,7 @@ class DeepSF(SF):
         target_update_ev : integer 
             how often to update the target network, measured by the number of training calls
         """
-        super(DeepSF, self).__init__(*args, **kwargs)
+        super(DeepSF_TSF_PHI, self).__init__(*args, **kwargs)
         self.pytorch_model_handle = pytorch_model_handle
         self.target_update_ev = target_update_ev
         
@@ -45,8 +46,6 @@ class DeepSF(SF):
             self.n_features = task.feature_dim()
             self.inputs = task.encode_dim()
             
-        # build SF network and copy its weights from previous task
-        # output shape is assumed to be [n_batch, n_actions, n_features]
         model, loss, optim = self.pytorch_model_handle(self.inputs, self.n_actions * self.n_features, (self.n_actions, self.n_features), 1)
 
         if source is not None and self.n_tasks > 0:
@@ -71,9 +70,6 @@ class DeepSF(SF):
         # target_model.set_weights(model.parameters())
         update_models_weights(model, target_model)
         self.updates_since_target_updated.append(0)
-
-        # Set target model to eval
-        target_model.eval()
         
         return (model, loss, optim), (target_model, target_loss, target_optim)
         
@@ -89,43 +85,80 @@ class DeepSF(SF):
             predictions.append( self.get_successor(state, policy_index))
 
         return torch.stack(predictions, axis=1).to(self.device)
+
+    def get_next_successor(self, state, policy_index):
+        _, next_psi_tuple = self.psi[policy_index]
+        psi, *_ = next_psi_tuple
+        return psi(state)
+
+    def get_next_successors(self, state):
+        #return self.all_output_model.predict_on_batch(state)
+        predictions = []
+        for policy_index in range(len(self.psi)):
+            predictions.append(self.get_next_successor(state, policy_index))
+
+        return torch.stack(predictions, axis=1).to(self.device)
+
+    def update_reward(self, phi: torch.Tensor, r: torch.Tensor, task_index: int, exact=False) -> None:
+        raise Exception("This function shouldn't be used")
     
-    def update_successor(self, transitions, policy_index):
-        if transitions is None:
-            return
-        states, actions, phis, next_states, gammas = transitions
-        n_batch = len(gammas)
-        indices = torch.arange(n_batch)
-        gammas = gammas.reshape((-1, 1))
-         
-        # next actions come from GPI
-        q1, _ = self.GPI(next_states, policy_index)
-        next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
+    def update_successor(self, transitions, phis_models, policy_index):
+        raise Exception("This function shouldn't be used")
+
+    def GPI_w(self, state, w):
+        """
+        Implements generalized policy improvement according to [1]. 
         
-        # compute the targets and TD errors
-        psi_tuple, target_psi_tuple = self.psi[policy_index]
-        psi_model, psi_loss, psi_optim = psi_tuple
-        target_psi_model, *_ = target_psi_tuple
-
-        current_psi = psi_model(states)
-
-        with torch.no_grad():
-            targets = phis + gammas * target_psi_model(next_states)[indices, next_actions,:]
+        Parameters
+        ----------
+        state : object
+            a state or collection of states of the MDP
+        w : numpy array
+            the reward parameters of the task to control
         
-        # train the SF network
-        merge_current_target_psi = current_psi.clone()
-        merge_current_target_psi[indices, actions,:] = targets
-        # psi_model.train_on_batch(states, current_psi)
+        Returns
+        -------
+        torch.Tensor : the maximum Q-values computed by GPI for selecting actions
+        of shape [n_batch, n_tasks, n_actions], where:
+            n_batch is the number of states in the state argument
+            n_tasks is the number of tasks
+            n_actions is the number of actions in the MDP 
+        torch.Tensor : the tasks that are active in each state of state_batch in GPi
+        """
+        psi = self.get_successors(state)
+        #q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
+        # in phi learning w is a linear approximator
+        q = w(psi)[:,:,:,0]
+        task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+        return q, task
 
-        psi_optim.zero_grad()
-        loss = psi_loss(current_psi, merge_current_target_psi)
-        loss.backward()
-        psi_optim.step()
-
-        # Finish train the SF network
+    def add_training_task(self, task, source=None):
+        """
+        Adds a successor feature representation for the specified task.
         
-        # update the target SF network
-        self.updates_since_target_updated[policy_index] += 1
-        if self.updates_since_target_updated[policy_index] >= self.target_update_ev:
-            update_models_weights(psi_model, target_psi_model)
-            self.updates_since_target_updated[policy_index] = 0
+        Parameters
+        ----------
+        task : Task
+            a new MDP environment for which to learn successor features
+        source : integer
+            if specified and not None, the parameters of the successor features for the task at the source
+            index should be copied to the new successor features, as suggested in [1]
+        """
+        
+        # add successor features to the library
+        self.psi.append(self.build_successor(task, source))
+        self.n_tasks = len(self.psi)
+
+        true_w = task.get_w()
+        # build new reward function
+        # TODO Remove task feature_dim should be called from the agent or config
+        n_features = task.feature_dim()
+        fit_w = torch.nn.Linear(n_features, 1).to(self.device)
+        
+        self.fit_w.append(fit_w)
+        self.true_w.append(true_w)
+        
+        # add statistics
+        for i in range(len(self.gpi_counters)):
+            self.gpi_counters[i] = np.append(self.gpi_counters[i], 0)
+        self.gpi_counters.append(np.zeros((self.n_tasks,), dtype=int))

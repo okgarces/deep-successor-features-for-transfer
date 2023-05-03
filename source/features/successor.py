@@ -1,10 +1,11 @@
 # -*- coding: UTF-8 -*-
 import numpy as np
-
+import torch
+from utils.torch import get_torch_device
 
 class SF:
     
-    def __init__(self, learning_rate_w, *args, use_true_reward=False, **kwargs):
+    def __init__(self, *args, use_true_reward=False, **kwargs):
         """
         Creates a new abstract successor feature representation.
         
@@ -16,10 +17,14 @@ class SF:
             whether or not to use the true reward weights from the environment, or learn them
             using gradient descent
         """
-        self.alpha_w = learning_rate_w
         self.use_true_reward = use_true_reward
+        self.hyperparameters = kwargs.get('hyperparameters', {})
+        self.alpha_w = self.hyperparameters.get('learning_rate_w')
+
         if len(args) != 0 or len(kwargs) != 0:
             print(self.__class__.__name__ + ' ignoring parameters ' + str(args) + ' and ' + str(kwargs))
+
+        self.device = get_torch_device()
             
     def build_successor(self, task, source=None):
         """
@@ -130,7 +135,7 @@ class SF:
             fit_w = true_w
         else:
             n_features = task.feature_dim()
-            fit_w = np.random.uniform(low=-0.01, high=0.01, size=(n_features, 1))
+            fit_w = torch.Tensor(n_features, 1).uniform_(-0.01, 0.01).to(self.device)
         self.fit_w.append(fit_w)
         
         # add statistics
@@ -138,16 +143,16 @@ class SF:
             self.gpi_counters[i] = np.append(self.gpi_counters[i], 0)
         self.gpi_counters.append(np.zeros((self.n_tasks,), dtype=int))
         
-    def update_reward(self, phi, r, task_index, exact=False):
+    def update_reward(self, phi: torch.Tensor, r: torch.Tensor, task_index: int, exact=False) -> None:
         """
         Updates the reward parameters for the given task based on the observed reward sample
         from the environment. 
         
         Parameters
         ----------
-        phi : np.ndarray
+        phi : torch.Tensor 
             the state features
-        r : float
+        r : torch.TensorFloat | torch.Tensor
             the observed reward from the MDP
         task_index : integer
             the index of the task from which this reward was sampled
@@ -158,16 +163,16 @@ class SF:
         # update reward using linear regression
         w = self.fit_w[task_index]
         phi = phi.reshape(w.shape)
-        r_fit = np.sum(phi * w)
+        r_fit = torch.sum(phi * w)
         self.fit_w[task_index] = w + self.alpha_w * (r - r_fit) * phi
     
         # validate reward
-        r_true = np.sum(phi * self.true_w[task_index])
-        if exact and not np.allclose(r, r_true):
+        r_true = torch.sum(phi * self.true_w[task_index])
+        if exact and not torch.allclose(r, r_true):
             raise Exception('sampled reward {} != linear reward {} - please check task {}!'.format(
                 r, r_true, task_index))
     
-    def GPE_w(self, state, policy_index, w):
+    def GPE_w(self, state: torch.Tensor, policy_index: int, w: torch.Tensor) -> torch.Tensor:
         """
         Implements generalized policy evaluation according to [1]. In summary, this uses the
         learned reward parameters of one task and successor features of a policy to estimate the Q-values of 
@@ -184,7 +189,7 @@ class SF:
             
         Returns
         -------
-        np.ndarray : the estimated Q-values of shape [n_batch, n_actions], where
+        torch.Tensor : the estimated Q-values of shape [n_batch, n_actions], where
             n_batch is the number of states in the state argument
             n_actions is the number of actions in the MDP            
         """
@@ -192,7 +197,7 @@ class SF:
         q = psi @ w  # shape (n_batch, n_actions)
         return q
         
-    def GPE(self, state, policy_index, task_index):
+    def GPE(self, state: torch.Tensor, policy_index: int, task_index: int):
         """
         Implements generalized policy evaluation according to [1]. In summary, this uses the
         learned reward parameters of one task and successor features of a policy to estimate the Q-values of 
@@ -209,7 +214,7 @@ class SF:
             
         Returns
         -------
-        np.ndarray : the estimated Q-values of shpae [n_batch, n_actions], where
+        torch.Tensor : the estimated Q-values of shpae [n_batch, n_actions], where
             n_batch is the number of states in the state argument
             n_actions is the number of actions in the MDP            
         """
@@ -228,16 +233,16 @@ class SF:
         
         Returns
         -------
-        np.ndarray : the maximum Q-values computed by GPI for selecting actions
+        torch.Tensor : the maximum Q-values computed by GPI for selecting actions
         of shape [n_batch, n_tasks, n_actions], where:
             n_batch is the number of states in the state argument
             n_tasks is the number of tasks
             n_actions is the number of actions in the MDP 
-        np.ndarray : the tasks that are active in each state of state_batch in GPi
+        torch.Tensor : the tasks that are active in each state of state_batch in GPi
         """
         psi = self.get_successors(state)
         q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
-        task = np.squeeze(np.argmax(np.max(q, axis=2), axis=1))  # shape (n_batch,)
+        task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
         return q, task
     
     def GPI(self, state, task_index, update_counters=False):
@@ -255,12 +260,12 @@ class SF:
         
         Returns
         -------
-        np.ndarray : the maximum Q-values computed by GPI for selecting actions
+        torch.Tensor : the maximum Q-values computed by GPI for selecting actions
         of shape [n_batch, n_tasks, n_actions], where:
             n_batch is the number of states in the state argument
             n_tasks is the number of tasks
             n_actions is the number of actions in the MDP 
-        np.ndarray : the tasks that are active in each state of state_batch in GPi
+        torch.Tensor : the tasks that are active in each state of state_batch in GPi
         """
         q, task = self.GPI_w(state, self.fit_w[task_index])
         if update_counters:

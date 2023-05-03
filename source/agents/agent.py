@@ -1,10 +1,12 @@
 # -*- coding: UTF-8 -*-
 import random
-import numpy as np
+import torch
+
+from utils.torch import device
 
 
 class Agent:
-    
+
     def __init__(self, gamma, T, encoding, *args, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
                  print_ev=1000, save_ev=100, **kwargs):
         """
@@ -39,6 +41,8 @@ class Agent:
         self.epsilon_min = epsilon_min
         self.print_ev = print_ev
         self.save_ev = save_ev
+        self.total_training_steps = 0
+        self.sf = None
         if len(args) != 0 or len(kwargs) != 0:
             print(self.__class__.__name__ + ' ignoring parameters ' + str(args) + ' and ' + str(kwargs))
         
@@ -138,13 +142,14 @@ class Agent:
     # TRAINING
     # ===========================================================================
     def _epsilon_greedy(self, q):
-        assert q.size == self.n_actions
+        q = q.flatten()
+        assert q.size()[0] == self.n_actions
         
         # sample from a Bernoulli distribution with parameter epsilon
         if random.random() <= self.epsilon:
-            a = random.randrange(self.n_actions)
+            a = torch.tensor(random.randrange(self.n_actions)).to(device)
         else:
-            a = np.argmax(q)
+            a = torch.argmax(q)
         
         # decrease the exploration gradually
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
@@ -163,7 +168,30 @@ class Agent:
         reward_str = 'ep_reward \t {:.4f} \t reward \t {:.4f}'.format(
             self.episode_reward, self.reward)
         return sample_str, reward_str
-    
+
+    def get_progress_dict(self):
+        if self.sf is not None:
+            gpi_percent = self.sf.GPI_usage_percent(self.task_index)
+            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index] - self.sf.true_w[self.task_index])
+        else:
+            gpi_percent = None
+            w_error = None
+
+        return_dict = {
+            'task': self.task_index,
+            'steps': self.total_training_steps,
+            'episodes': self.episode,
+            'eps': self.epsilon,
+            'ep_reward': self.episode_reward,
+            'reward': self.reward,
+            'reward_hist': self.reward_hist,
+            'cum_reward': self.cum_reward,
+            'cum_reward_hist': self.cum_reward_hist,
+            'GPI%': gpi_percent,
+            'w_err': w_error
+            }
+        return return_dict
+
     def next_sample(self, viewer=None, n_view_ev=None):
         """
         Updates the agent by performing one interaction with the current training environment.
@@ -179,7 +207,6 @@ class Agent:
             how often (in training episodes) to invoke the viewer to display agent's learned behavior
             (defaults to None)
         """
-        
         # start a new episode
         if self.new_episode:
             self.s = self.active_task.initialize()
@@ -229,9 +256,9 @@ class Agent:
         if viewer is not None and self.episode % n_view_ev == 0:
             viewer.update()
         
-        # printing
-        if self.steps % self.print_ev == 0:
-            print('\t'.join(self.get_progress_strings()))
+        # Remove printing
+        #if self.steps % self.print_ev == 0:
+        #    print('\t'.join(self.get_progress_strings()))
     
     def train_on_task(self, train_task, n_samples, viewer=None, n_view_ev=None):
         """

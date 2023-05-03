@@ -9,14 +9,18 @@ from tasks.task import Task
 from utils.torch import get_torch_device
 
 
-class Reacher(Task):
+class ReacherDissimilar(Task):
     
-    def __init__(self, target_positions, task_index, include_target_in_state=False):
+    def __init__(self, target_positions, task_index, torque_multipliers, filenames_mjfc, include_target_in_state=False):
         self.target_positions = target_positions
         self.task_index = task_index
         self.target_pos = target_positions[task_index]
         self.include_target_in_state = include_target_in_state
-        self.env = ReacherBulletEnv(self.target_pos)
+        self.torque_multipliers = torque_multipliers
+        self.filenames_mjfc = filenames_mjfc
+        self.env = ReacherBulletEnv(self.target_pos, self.torque_multipliers[task_index], self.filenames_mjfc[task_index])
+
+        print(f'Task_Index {self.task_index}, filename {self.filenames_mjfc[self.task_index]}, torque {self.torque_multipliers[self.task_index]}')
         
         # make the action lookup from integer to real action
         actions = [-1., 0., 1.]
@@ -90,8 +94,8 @@ class Reacher(Task):
 
 class ReacherBulletEnv(BaseBulletEnv):
 
-    def __init__(self, target):
-        self.robot = ReacherRobot(target)
+    def __init__(self, target, torque_multiplier, config_filename):
+        self.robot = ReacherRobot(target, torque_multiplier, config_filename)
         BaseBulletEnv.__init__(self, self.robot)
 
     def create_single_player_scene(self, bullet_client):
@@ -121,9 +125,10 @@ class ReacherBulletEnv(BaseBulletEnv):
 class ReacherRobot(MJCFBasedRobot):
     TARG_LIMIT = 0.27
 
-    def __init__(self, target):
-        MJCFBasedRobot.__init__(self, 'reacher.xml', 'body0', action_dim=2, obs_dim=4)
+    def __init__(self, target, torque_multiplier, config_filename):
+        MJCFBasedRobot.__init__(self, config_filename, 'body0', action_dim=2, obs_dim=4)
         self.target_pos = target
+        self.torque_multiplier = torque_multiplier
 
     def robot_specific_reset(self, bullet_client):
         self.jdict["target_x"].reset_current_position(self.target_pos[0], 0)
@@ -138,8 +143,9 @@ class ReacherRobot(MJCFBasedRobot):
     def apply_action(self, a):
         # Here np is ok. To apply a tuple real action to env.
         assert (np.isfinite(a).all())
-        self.central_joint.set_motor_torque(0.05 * float(np.clip(a[0], -1, +1)))
-        self.elbow_joint.set_motor_torque(0.05 * float(np.clip(a[1], -1, +1)))
+        # Initial Reacher has torque multiplier 0.05
+        self.central_joint.set_motor_torque(self.torque_multiplier * float(np.clip(a[0], -1, +1)))
+        self.elbow_joint.set_motor_torque(self.torque_multiplier * float(np.clip(a[1], -1, +1)))
 
     def calc_state(self):
         theta, self.theta_dot = self.central_joint.current_relative_position()

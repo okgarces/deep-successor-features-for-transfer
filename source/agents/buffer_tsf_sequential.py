@@ -22,6 +22,9 @@ class ReplayBuffer:
         self.n_batch = n_batch
 
         self.device = get_torch_device()
+
+        # When initialize run reset()
+        self.reset()
     
     def reset(self):
         """
@@ -51,15 +54,16 @@ class ReplayBuffer:
         """
         if self.size < self.n_batch: return None
         indices = np.random.randint(low=0, high=self.size, size=(self.n_batch,))
-        states, actions, rewards, next_states, gammas = zip(*self.buffer[indices])
+        states, actions, rewards, phis, next_states, gammas = zip(*self.buffer[indices])
         states = torch.vstack(states).to(self.device)
         actions = torch.tensor(actions).to(self.device)
         rewards = torch.vstack(rewards).to(self.device)
+        phis = torch.vstack(phis).to(self.device)
         next_states = torch.vstack(next_states).to(self.device)
         gammas = torch.tensor(gammas).to(self.device)
-        return states, actions, rewards, next_states, gammas
+        return states, actions, rewards, phis, next_states, gammas
     
-    def append(self, state: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, next_state: torch.Tensor, gamma: torch.Tensor) -> None:
+    def append(self, state: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, phi: torch.Tensor, next_state: torch.Tensor, gamma: torch.Tensor) -> None:
         """
         Adds the specified sample to the replay buffer. If the buffer is full, then the earliest added
         sample is removed, and the new sample is added.
@@ -77,7 +81,8 @@ class ReplayBuffer:
         gamma : float
             the effective discount factor to be applied in computing targets for training
         """
-        self.buffer[self.index] = (state, action, reward, next_state, gamma)
+        # Reward are double. Here we convert to float to store float in Buffer
+        self.buffer[self.index] = (state, action, reward.float(), phi, next_state, gamma)
         self.size = min(self.size + 1, self.n_samples)
         self.index = (self.index + 1) % self.n_samples
         

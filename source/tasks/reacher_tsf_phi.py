@@ -9,9 +9,9 @@ from tasks.task import Task
 from utils.torch import get_torch_device
 
 
-class Reacher(Task):
+class Reacher_TSF_PHI(Task):
     
-    def __init__(self, target_positions, task_index, include_target_in_state=False):
+    def __init__(self, target_positions, task_index, n_features, include_target_in_state=False):
         self.target_positions = target_positions
         self.task_index = task_index
         self.target_pos = target_positions[task_index]
@@ -26,6 +26,7 @@ class Reacher(Task):
                 self.action_dict[len(self.action_dict)] = (a1, a2)
 
         self.device = get_torch_device()
+        self.n_features = n_features
         
     def clone(self):
         return Reacher(self.target_positions, self.task_index, self.include_target_in_state)
@@ -33,7 +34,7 @@ class Reacher(Task):
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = torch.tensor(self.env.reset()).detach().requires_grad_(False).to(self.device)
+        state = torch.tensor(self.env.reset()).to(self.device)
         if self.include_target_in_state:
             return torch.concat([state.flatten(), self.target_pos]).to(self.device)
         else:
@@ -47,8 +48,8 @@ class Reacher(Task):
         real_action = self.action_dict[action_int]
         new_state, reward, done, _ = self.env.step(real_action)
 
-        new_state = torch.tensor(new_state).detach().requires_grad_(False).to(self.device)
-        reward = torch.tensor(reward).detach().requires_grad_(False).to(self.device)
+        new_state = torch.tensor(new_state).to(self.device)
+        reward = torch.tensor(reward).to(self.device)
         
         if self.include_target_in_state:
             return_state = torch.concat([new_state, self.target_pos])
@@ -61,7 +62,7 @@ class Reacher(Task):
     # STATE ENCODING FOR DEEP LEARNING
     # ===========================================================================
     def encode(self, state):
-        return torch.tensor(state).detach().requires_grad_(False).reshape((1, -1)).to(self.device)
+        return torch.tensor(state).reshape((1, -1)).to(self.device)
     
     def encode_dim(self):
         if self.include_target_in_state:
@@ -73,19 +74,19 @@ class Reacher(Task):
     # SUCCESSOR FEATURES
     # ===========================================================================
     def features(self, state, action, next_state):
-        phi = torch.zeros((len(self.target_positions),)).to(self.device)
-        for index, target in enumerate(self.target_positions):
-            delta = torch.linalg.norm(torch.tensor(self.env.robot.fingertip.pose().xyz()[:2]).detach().requires_grad_(False).to(self.device) - torch.tensor(target).detach().requires_grad_(False).to(self.device))
-            phi[index] = 1. - 4. * delta
-        return phi
+        raise Exception('Phi Version should learn features')
     
     def feature_dim(self):
-        return len(self.target_positions)
+        return self.n_features
     
     def get_w(self):
         w = torch.zeros((len(self.target_positions), 1)).to(self.device)
         w[self.task_index, 0] = 1.0
         return w
+
+    def action_dim(self):
+        # The action dim for Reacher is only a integer number
+        return 1
 
 
 class ReacherBulletEnv(BaseBulletEnv):
