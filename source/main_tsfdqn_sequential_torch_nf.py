@@ -1,16 +1,9 @@
 # -*- coding: UTF-8 -*- 
-from tsfdqn_nf import TSFDQN, ReplayBuffer, DeepTSF
-
-from tasks.reacher import Reacher
 from utils.config import parse_config_file
 from utils.torch import set_torch_device, get_activation
 from utils.logger import set_logger_level
 from utils.types import ModelTuple
 
-import torch
-from collections import OrderedDict
-
-# read parameters from config file
 config_params = parse_config_file('reacher.cfg')
 
 gen_params = config_params['GENERAL']
@@ -31,6 +24,14 @@ sfdqn_params = config_params['SFDQN']
 # Config GPU for Torch and logger
 device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
 logger = set_logger_level(use_logger=use_logger)
+
+from tsfdqn_nf import TSFDQN, ReplayBuffer, DeepTSF
+from tasks.reacher import Reacher
+
+import torch
+from collections import OrderedDict
+
+# read parameters from config file
 
 # tasks
 def generate_tasks(include_target):
