@@ -1,9 +1,11 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from utils.torch import get_torch_device, update_models_weights
 from utils.logger import get_logger_level
 import random
+
 
 device = get_torch_device()
 
@@ -324,6 +326,36 @@ class DeepTSF:
         return 1. - (float(counts[task_index]) / np.sum(counts))
 
 
+################################## NF ######################################################
+
+class PlanarFlow(torch.nn.Module):
+
+    def __init__(self, dim):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.Tensor(1, dim))
+        self.bias = torch.nn.Parameter(torch.Tensor(1))
+        self.scale = torch.nn.Parameter(torch.Tensor(1, dim))
+        self.tanh = torch.nn.Tanh()
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.weight.data.uniform_(-0.01, 0.01)
+        self.scale.data.uniform_(-0.01, 0.01)
+        self.bias.data.uniform_(-0.01, 0.01)
+
+    def forward(self, z):
+        activation = F.linear(z, self.weight, self.bias)
+        return z + self.scale * self.tanh(activation)
+
+    @classmethod
+    def build_planar_flow(cls, input_dim, output_dim, n_affine_flows):
+        flows = [cls(input_dim) for _ in range(n_affine_flows)]
+        # Last input 
+        last_layer = torch.nn.Linear(input_dim, output_dim, bias=True, device=device)
+        flows.append(last_layer)
+
+        return torch.nn.Sequential(*flows).to(device)
 
 ################################## Agent ####################################################
 class TSFDQN:
@@ -534,9 +566,9 @@ class TSFDQN:
             self.c = c
             return q[:, c,:]
 
-    def _init_g_function(self, states_dim, output_dim):
-        # g : |S| -> |d|, d features dimension
-        g_function = torch.nn.Linear(states_dim, output_dim, bias=True, device=self.device)
+    def _init_g_function(self, states_dim, output_dim, n_coupling_layers):
+        # Number of planarflows = 10
+        g_function = PlanarFlow.build_planar_flow(states_dim, output_dim, n_coupling_layers)
         #with torch.no_grad():
         #    # 0.001 and 0.01 got from analysis between the max values of g_function [-220, 200] and phi prefixed is [-1.5, 1]
         #    weights = torch.eye(features_dim, states_dim).to(self.device).requires_grad_(False)
@@ -728,8 +760,9 @@ class TSFDQN:
         # Transformed Successor Feature
         # Encode Dim encapsulates the state encoding dimension
         g_h_function_dims = self.hyperparameters.get('g_h_function_dims')
+        n_coupling_layers = self.hyperparameters.get('n_coupling_layers', 1)
 
-        g_function = self._init_g_function(task.encode_dim(), g_h_function_dims)
+        g_function = self._init_g_function(task.encode_dim(), g_h_function_dims, n_coupling_layers)
         self.g_functions.append(g_function)
 
         if self.h_function is None:
