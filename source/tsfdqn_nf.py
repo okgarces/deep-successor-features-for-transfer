@@ -332,9 +332,9 @@ class PlanarFlow(torch.nn.Module):
 
     def __init__(self, dim):
         super().__init__()
-        self.weight = torch.nn.Parameter(torch.Tensor(1, dim))
-        self.bias = torch.nn.Parameter(torch.Tensor(1))
-        self.scale = torch.nn.Parameter(torch.Tensor(1, dim))
+        self.weight = torch.nn.Parameter(torch.Tensor(1, dim)).to(device)
+        self.bias = torch.nn.Parameter(torch.Tensor(1)).to(device)
+        self.scale = torch.nn.Parameter(torch.Tensor(1, dim)).to(device)
         self.tanh = torch.nn.Tanh()
 
         self.reset_parameters()
@@ -350,7 +350,7 @@ class PlanarFlow(torch.nn.Module):
 
     @classmethod
     def build_planar_flow(cls, input_dim, output_dim, n_affine_flows):
-        flows = [cls(input_dim) for _ in range(n_affine_flows)]
+        flows = [cls(input_dim).to(device) for _ in range(n_affine_flows)]
         # Last input 
         last_layer = torch.nn.Linear(input_dim, output_dim, bias=True, device=device)
         flows.append(last_layer)
