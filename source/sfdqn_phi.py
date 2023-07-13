@@ -865,6 +865,7 @@ n_samples = gen_params['n_samples']
 use_gpu= gen_params.get('use_gpu', False) # Default GPU False
 use_logger= gen_params.get('use_logger', False) # Default GPU False
 n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default GPU False
+gpu_device_index = gen_params['gpu_device_index']
 
 task_params = config_params['TASK']
 goals = task_params['train_targets']
@@ -878,7 +879,7 @@ phi_learning_params = config_params['PHI']
 n_features = phi_learning_params['n_features']
 
 # Config GPU for Torch and logger
-device = set_torch_device(use_gpu=use_gpu)
+device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
 logger = set_logger_level(use_logger=use_logger)
 
 device = get_torch_device()
