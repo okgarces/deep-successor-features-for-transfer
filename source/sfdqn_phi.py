@@ -502,7 +502,9 @@ class SFDQN:
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         
         # remember this experience
-        phi = self.phi(s, a, s1)
+        with torch.no_grad():
+            phi = self.phi(s, a, s1)
+
         self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
         
         # update SFs
