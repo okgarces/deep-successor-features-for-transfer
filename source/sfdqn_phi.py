@@ -791,7 +791,7 @@ class SFDQN:
             }
         return return_dict
 
-    def pre_train(self, train_tasks, n_samples_pre_train):
+    def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5):
         # The result of this pre_train is having the first n_samples to fit reconstruct the feature function
         # At the end the idea is to override a phi function: self.learnt_phi
         first_task = train_tasks[0]
@@ -800,49 +800,70 @@ class SFDQN:
 
         # Here I put all the model
         phi_learn_model = PhiFunction(first_task.encode_dim(), first_task.action_dim(), first_task.feature_dim())
-
+        
+        losses = []
+        
+        fit_ws = []
+        fit_ws_optim = []
+        
+        # Initialize weights
+        # Having a random policy using
         for task in train_tasks:
-            # Having a random policy using
             fit_w = torch.nn.Linear(task.feature_dim(), 1, bias=False, device=device)
             with torch.no_grad():
                 fit_w.weight = torch.nn.Parameter(torch.Tensor(1, task.feature_dim()).uniform_(-0.01, 0.01).to(device))
+        
             fit_w_optim = torch.optim.Adam(fit_w.parameters(), lr=1e-3)
+            
+            fit_ws.append(fit_w)
+            fit_ws_optim.append(fit_w_optim)
+        
+        
+        for cycle in range(n_cycles):
+            for task_id, task in enumerate(train_tasks):
+                # Having a random policy using
+                fit_w = fit_ws[task_id]
+                fit_w_optim = fit_ws_optim[task_id]
 
-            s_enc = task.encode(task.initialize())
+                s_enc = task.encode(task.initialize())
 
-            for sample in range(n_samples_pre_train):
-                a = random.randrange(n_actions)
-                s1, r, terminal = task.transition(a)
-                s1_enc = task.encode(s1)
+                for sample in range(n_samples_pre_train):
+                    a = random.randrange(n_actions)
+                    s1, r, terminal = task.transition(a)
+                    s1_enc = task.encode(s1)
 
-                # state, action, reward.float(), phi, next_state, gamma
-                buffer.append(s_enc, torch.tensor(a, device=device), torch.tensor(r, device=device, dtype=torch.float32), torch.tensor([0]), s1_enc, torch.tensor([0]))
+                    # state, action, reward.float(), phi, next_state, gamma
+                    buffer.append(s_enc, torch.tensor(a, device=device), torch.tensor(r, device=device, dtype=torch.float32), torch.tensor([0]), s1_enc, torch.tensor([0]))
 
-                # moving to next_state
-                s_enc = s1_enc
+                    # moving to next_state
+                    s_enc = s1_enc
 
-                if terminal:
-                    s_enc = task.encode(task.initialize())
+                    if terminal:
+                        s_enc = task.encode(task.initialize())
 
-                # update phi model using mini batch
-                replay = buffer.replay()
+                    # update phi model using mini batch
+                    replay = buffer.replay()
 
-                if replay is not None:
-                    state_batch, action_batch, reward_batch, _, next_state_batch, _ = replay
+                    if replay is not None:
+                        state_batch, action_batch, reward_batch, _, next_state_batch, _ = replay
 
-                    phis = phi_learn_model(state_batch, action_batch, next_state_batch) # [B, feature_dim]
-                    linear_combination = fit_w(phis)
+                        phis = phi_learn_model(state_batch, action_batch, next_state_batch) # [B, feature_dim]
+                        linear_combination = fit_w(phis)
 
-                    fit_w_optim.zero_grad()
-                    phi_learn_model.optimiser.zero_grad()
+                        fit_w_optim.zero_grad()
+                        phi_learn_model.optimiser.zero_grad()
 
-                    loss = torch.nn.functional.mse_loss(reward_batch, linear_combination)
-                    loss.backward()
-                    phi_learn_model.optimiser.step()
-                    fit_w_optim.step()
-        buffer.reset()
-        self.learnt_phi = phi_learn_model
-        self.learnt_phi.set_eval()
+                        loss = torch.nn.functional.mse_loss(reward_batch, linear_combination)
+                        loss.backward()
+                        phi_learn_model.optimiser.step()
+                        fit_w_optim.step()
+
+                        losses.append(loss.item())
+            buffer.reset()
+            self.learnt_phi = phi_learn_model
+            self.learnt_phi.set_eval()
+        
+        return losses
 
 
 ###########################################################################################################################################
@@ -939,7 +960,7 @@ def main_train():
     
     # Pre train
     print('pre training SFDQN sequential')
-    sfdqn.pre_train(train_tasks, 2_500) # 2500 steps on each task. as pre train
+    sfdqn.pre_train(train_tasks, 5_000) # 2500 steps on each task. as pre train
     
     # train SFDQN
     print('training SFDQN  Sequential')
