@@ -861,9 +861,10 @@ class SFDQN:
                         fit_w_optim.step()
 
                         losses.append(loss.item())
-            buffer.reset()
-            self.learnt_phi = phi_learn_model
-            self.learnt_phi.set_eval()
+
+        buffer.reset()
+        self.learnt_phi = phi_learn_model
+        self.learnt_phi.set_eval()
         
         return losses
 
