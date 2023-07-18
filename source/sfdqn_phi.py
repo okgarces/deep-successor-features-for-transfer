@@ -159,7 +159,6 @@ class DeepSF:
         """
         self.n_tasks = 0
         self.psi = []
-        self.true_w = []
         self.fit_w = []
         self.gpi_counters = []
         self.updates_since_target_updated = []
@@ -223,7 +222,6 @@ class DeepSF:
         """
         
         # build new reward function
-        true_w = task.get_w()
 
         n_features = task.feature_dim()
         fit_w = torch.Tensor(1, n_features).uniform_(-0.01, 0.01).to(device)
@@ -232,7 +230,6 @@ class DeepSF:
         with torch.no_grad():
             w_approx.weight = torch.nn.Parameter(fit_w)
 
-        self.true_w.append(true_w)
         self.fit_w.append(w_approx)
 
         # add successor features to the library
@@ -874,6 +871,8 @@ class SFDQN:
 import matplotlib.pyplot as plt
 
 from tasks.reacher_phi import Reacher_PHI
+from tasks.cartpole_phi import Cartpole_PHI
+
 from utils.config import parse_config_file
 from utils.torch import set_torch_device, get_activation
 from utils.logger import set_logger_level
@@ -882,7 +881,9 @@ import torch
 from collections import OrderedDict
 
 # read parameters from config file
-config_params = parse_config_file('reacher_phi.cfg')
+# config_params = parse_config_file('reacher_phi.cfg')
+
+config_params = parse_config_file('cartpole_phi.cfg')
 
 gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
@@ -910,9 +911,14 @@ device = get_torch_device()
 
 
 # tasks
-def generate_tasks(include_target):
-    train_tasks = [Reacher_PHI(all_goals, i, n_features,  include_target) for i in range(len(goals))]
-    test_tasks = [Reacher_PHI(all_goals, i + len(goals), n_features, include_target) for i in range(len(test_goals))]
+def generate_tasks(include_target, experiment='reacher'):
+    if experiment == 'reacher':
+        train_tasks = [Reacher_PHI(all_goals, i, n_features,  include_target) for i in range(len(goals))]
+        test_tasks = [Reacher_PHI(all_goals, i + len(goals), n_features, include_target) for i in range(len(test_goals))]
+    elif experiment == 'cartpole':
+        train_tasks = [Cartpole_PHI(i, n_features, goal) for i, goal in enumerate(goals)]
+        test_tasks = [Cartpole_PHI(i, n_features, goal) for i, goal in enumerate(test_goals)]
+
     return train_tasks, test_tasks
 
 
@@ -951,8 +957,8 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
 def replay_buffer_handle():
     return ReplayBuffer(**sfdqn_params['buffer_params'])
 
-def main_train():
-    train_tasks, test_tasks = generate_tasks(False)
+def main_train(environment):
+    train_tasks, test_tasks = generate_tasks(False, environment)
     # build SFDQN    
     print('building SFDQN Sequential')
     print(f'PyTorch Seed {torch.seed()}')
@@ -971,4 +977,4 @@ def main_train():
     print('End Training SFDQN Sequential')
 
 ######
-main_train()
+# main_train('cartpole')
