@@ -612,7 +612,10 @@ class SFDQN:
             self.episode_reward = self.reward_since_last_episode
             self.reward_since_last_episode = 0.   
             if self.episode > 1:
-                self.episode_reward_hist.append(self.episode_reward)  
+                self.episode_reward_hist.append(self.episode_reward)
+
+            # Log performance in source tasks
+            self.logger.log_source_performance(self.task_index, self.episode_reward, self.total_training_steps)
         
         # compute the Q-values in the current state
         # Epsilon greedy exploration/exploitation
@@ -739,24 +742,29 @@ class SFDQN:
         s_enc = self.encoding(s)
 
         accum_loss = 0
-        for _ in range(self.T):
-            a = self.get_test_action(s_enc, w)
-            s1, r, done = task.transition(a)
-            s1_enc = self.encoding(s1)
+        num_episodes = 10
+        for i in range(num_episodes):
+            for _ in range(self.T):
+                a = self.get_test_action(s_enc, w)
+                s1, r, done = task.transition(a)
+                s1_enc = self.encoding(s1)
 
-            # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc).item()
-            accum_loss += loss_t
+                # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
+                loss_t = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc).item()
+                accum_loss += loss_t
 
-            # Update states
-            s, s_enc = s1, s1_enc
-            R += r
+                # Update states
+                s, s_enc = s1, s1_enc
+                R += r
 
-            if done:
-                break
+                if done:
+                    break
+
+        R /= num_episodes
 
         # Log accum loss for T
-        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, test_index, self.T))
+        # Average reward after 1_000 training steps, and 10 episodes.
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, test_index))
 
         return R
 
@@ -779,12 +787,12 @@ class SFDQN:
         optim.step()
         return loss
 
-    def get_target_reward_mapper_error(self, r, loss, task_index, ts):
+    def get_target_reward_mapper_error(self, r, loss, task_index):
         return_dict = {
             'task': task_index,
             # Total steps and ev_frequency
             'reward': r,
-            'steps': ((500 * (self.total_training_steps // 1000)) + ts),
+            'steps': (self.T * (1 + self.total_training_steps // 1_000)), # 1_000 n_test_ev
             'w_error': loss,
             #'w_error': torch.linalg.norm(self.test_tasks_weights[task_index] - task.get_w())
             }
@@ -977,4 +985,4 @@ def main_train(environment):
     print('End Training SFDQN Sequential')
 
 ######
-# main_train('cartpole')
+main_train('cartpole')
