@@ -6,6 +6,10 @@ import time
 logger = None 
 
 class LoggerBase(object):
+    
+    def __init__(self, debug=True):
+        self.debug = debug
+
     @abstractmethod
     def log_scalar(self, category, value, epoch_iteration = None):
         raise NotImplemented()
@@ -84,13 +88,17 @@ class LoggerBase(object):
 
     def log_omegas_learning_rate(self, learning_rate, task_id, total_steps):
         self.log_scalar(f'Target_Tasks/Omegas_Learning_Rate/Ev_Steps/task_{task_id + 1}', learning_rate, total_steps)
+
+    def log_source_performance(self, reward, task_id, training_steps):
+        self.log_scalar(f'Source_Tasks/Rewards/task_{task_id + 1}', reward, training_steps)
  
     def finalize(self):
         raise NotImplemented()
 
 
 class Logger(LoggerBase):
-    def __init__(self):
+    def __init__(self, debug=True):
+        super().__init__(debug)
         # Change logdir todo Data
         self.writer = SummaryWriter(f'data/dynamics_sfdqn_run_%s' % time.strftime('%d_%m_%Y_%H_%M_%S'))
 
