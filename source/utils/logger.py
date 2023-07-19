@@ -89,7 +89,7 @@ class LoggerBase(object):
     def log_omegas_learning_rate(self, learning_rate, task_id, total_steps):
         self.log_scalar(f'Target_Tasks/Omegas_Learning_Rate/Ev_Steps/task_{task_id + 1}', learning_rate, total_steps)
 
-    def log_source_performance(self, reward, task_id, training_steps):
+    def log_source_performance(self, task_id, reward, training_steps):
         self.log_scalar(f'Source_Tasks/Rewards/task_{task_id + 1}', reward, training_steps)
  
     def finalize(self):
