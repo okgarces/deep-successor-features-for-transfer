@@ -559,10 +559,8 @@ class SFDQN:
     def get_progress_dict(self):
         if self.sf is not None:
             gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-            w_error = 0.0 # We do not need this statistic.
         else:
             gpi_percent = None
-            w_error = None
 
         return_dict = {
             'task': self.task_index,
@@ -575,7 +573,7 @@ class SFDQN:
             'cum_reward': self.cum_reward,
             'cum_reward_hist': self.cum_reward_hist,
             'GPI%': gpi_percent,
-            'w_err': w_error
+            'w_err': 0.0 # We do not need this statistic.
             }
         return return_dict
     
@@ -977,7 +975,7 @@ def main_train(environment):
     
     # Pre train
     print('pre training SFDQN sequential')
-    sfdqn.pre_train(train_tasks, 5_000) # 2500 steps on each task. as pre train
+    sfdqn.pre_train(train_tasks, 5_000) # 5_000 steps on each task. as pre train
     
     # train SFDQN
     print('training SFDQN  Sequential')

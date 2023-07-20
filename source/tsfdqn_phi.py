@@ -483,8 +483,11 @@ class TSFDQN:
             self.episode_reward = self.reward_since_last_episode
             self.reward_since_last_episode = 0.   
             if self.episode > 1:
-                self.episode_reward_hist.append(self.episode_reward)  
-        
+                self.episode_reward_hist.append(self.episode_reward)
+
+            # Log performance in source tasks
+            self.logger.log_source_performance(self.task_index, self.episode_reward, self.total_training_steps)
+
         # compute the Q-values in the current state
         q = self.get_Q_values(self.s, self.s_enc)
         
@@ -893,32 +896,36 @@ class TSFDQN:
         total_phi_loss = 0
         total_psi_loss = 0
 
-        for target_ev_step in range(self.T):
-            a = self.get_test_action(s_enc, w, omegas)
-            s1, r, done = task.transition(a)
-            s1_enc = self.encoding(s1)
-            a1 = self.get_test_action(s1_enc, w, omegas)
+        num_episodes = 10
 
-            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, r, s_enc, a, s1_enc, a1)
-            accum_loss += loss_t.item()
-            total_phi_loss += phi_loss.item()
-            total_psi_loss += psi_loss.item()
+        for i in range(num_episodes):
+            for target_ev_step in range(self.T):
+                a = self.get_test_action(s_enc, w, omegas)
+                s1, r, done = task.transition(a)
+                s1_enc = self.encoding(s1)
+                a1 = self.get_test_action(s1_enc, w, omegas)
 
-            # Index 1 is for omegas
-            scheduler.step()
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, r, s_enc, a, s1_enc, a1)
+                accum_loss += loss_t.item()
+                total_phi_loss += phi_loss.item()
+                total_psi_loss += psi_loss.item()
 
-            # Update states
-            s, s_enc = s1, s1_enc
-            R += r
+                # Index 1 is for omegas
+                scheduler.step()
 
-            if done:
-                break
+                # Update states
+                s, s_enc = s1, s1_enc
+                R += r
+
+                if done:
+                    break
+
+        R /= num_episodes
 
         # Log accum loss for T from in a random way
-        if(self.total_training_steps % 5000 == 0):
-            beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
-            self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
-            self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps))
+        beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
+        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient))
+        self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps))
 
         # Fix it seems omegas are being cached
         self.omegas[test_index] = omegas
@@ -1009,12 +1016,12 @@ class TSFDQN:
         # Loss, phi_loss, psi_loss
         return loss, l2, l1
 
-    def get_target_reward_mapper_error(self, r, loss, phi_loss, psi_loss, task_index, target_loss_coefficient, ts):
+    def get_target_reward_mapper_error(self, r, loss, phi_loss, psi_loss, task_index, target_loss_coefficient):
         return_dict = {
             'task': task_index,
             # Total steps and ev_frequency
             'reward': r,
-            'steps': ((500 * (self.total_training_steps // 1000)) + ts),
+            'steps': (self.T * (1 + self.total_training_steps // 1_000)),
             'w_error': loss,
             'psi_loss': psi_loss,
             'phi_loss': phi_loss,
