@@ -736,12 +736,13 @@ class SFDQN:
     def test_agent(self, task, test_index):
         R = 0.0
         w, optim = self.test_tasks_weights[test_index]
-        s = task.initialize()
-        s_enc = self.encoding(s)
 
         accum_loss = 0
         num_episodes = 10
         for i in range(num_episodes):
+            s = task.initialize()
+            s_enc = self.encoding(s)
+
             for _ in range(self.T):
                 a = self.get_test_action(s_enc, w)
                 s1, r, done = task.transition(a)

@@ -889,8 +889,6 @@ class TSFDQN:
         R = 0.0
         w, optim, scheduler = self.test_tasks_weights[test_index]
         omegas = self.omegas[test_index]
-        s = task.initialize()
-        s_enc = self.encoding(s)
 
         accum_loss = 0
         total_phi_loss = 0
@@ -899,6 +897,9 @@ class TSFDQN:
         num_episodes = 10
 
         for i in range(num_episodes):
+            s = task.initialize()
+            s_enc = self.encoding(s)
+
             for target_ev_step in range(self.T):
                 a = self.get_test_action(s_enc, w, omegas)
                 s1, r, done = task.transition(a)
