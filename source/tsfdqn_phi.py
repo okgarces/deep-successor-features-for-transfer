@@ -1217,3 +1217,6 @@ def main_train(environment):
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'],
                 cycles_per_task=n_cycles_per_task)
     print('End Training TSFDQN Sequential')
+
+if __name__ == '__main__':
+    main_train('cartpole')
