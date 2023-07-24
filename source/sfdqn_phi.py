@@ -500,7 +500,7 @@ class SFDQN:
         
         # remember this experience
         with torch.no_grad():
-            phi = self.phi(s, a, s1)
+            phi = self.phi(s_enc, a, s1_enc)
 
         self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
         
@@ -877,111 +877,119 @@ class SFDQN:
 ###########################################################################################################################################
 import matplotlib.pyplot as plt
 
-from tasks.reacher_phi import Reacher_PHI
-from tasks.cartpole_phi import Cartpole_PHI
+environment_name = 'hopper'
 
-from utils.config import parse_config_file
-from utils.torch import set_torch_device, get_activation
-from utils.logger import set_logger_level
+if __name__ == '__main__':
 
-import torch
-from collections import OrderedDict
+    from tasks.reacher_phi import Reacher_PHI
+    from tasks.cartpole_phi import Cartpole_PHI
+    from tasks.hopper_phi import Hopper_PHI
 
-# read parameters from config file
-# config_params = parse_config_file('reacher_phi.cfg')
+    from utils.config import parse_config_file
+    from utils.torch import set_torch_device, get_activation
+    from utils.logger import set_logger_level
 
-config_params = parse_config_file('cartpole_phi.cfg')
+    import torch
+    from collections import OrderedDict
 
-gen_params = config_params['GENERAL']
-n_samples = gen_params['n_samples']
-use_gpu= gen_params.get('use_gpu', False) # Default GPU False
-use_logger= gen_params.get('use_logger', False) # Default GPU False
-n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default GPU False
-gpu_device_index = gen_params['gpu_device_index']
+    # read parameters from config file
+    # config_params = parse_config_file('reacher_phi.cfg')
+    # config_params = parse_config_file('cartpole_phi.cfg')
+    config_params = parse_config_file(f'{environment_name}_phi.cfg')
 
-task_params = config_params['TASK']
-goals = task_params['train_targets']
-test_goals = task_params['test_targets']
-all_goals = goals + test_goals
-    
-agent_params = config_params['AGENT']
-sfdqn_params = config_params['SFDQN']
+    gen_params = config_params['GENERAL']
+    n_samples = gen_params['n_samples']
+    use_gpu= gen_params.get('use_gpu', False) # Default GPU False
+    use_logger= gen_params.get('use_logger', False) # Default GPU False
+    n_cycles_per_task = gen_params.get('cycles_per_task', 1) # Default GPU False
+    gpu_device_index = gen_params['gpu_device_index']
 
-phi_learning_params = config_params['PHI']
-n_features = phi_learning_params['n_features']
+    task_params = config_params['TASK']
+    goals = task_params['train_targets']
+    test_goals = task_params['test_targets']
+    all_goals = goals + test_goals
 
-# Config GPU for Torch and logger
-device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
-logger = set_logger_level(use_logger=use_logger)
+    agent_params = config_params['AGENT']
+    sfdqn_params = config_params['SFDQN']
 
-device = get_torch_device()
+    phi_learning_params = config_params['PHI']
+    n_features = phi_learning_params['n_features']
 
+    # Config GPU for Torch and logger
+    device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
+    logger = set_logger_level(use_logger=use_logger)
 
-# tasks
-def generate_tasks(include_target, experiment='reacher'):
-    if experiment == 'reacher':
-        train_tasks = [Reacher_PHI(all_goals, i, n_features,  include_target) for i in range(len(goals))]
-        test_tasks = [Reacher_PHI(all_goals, i + len(goals), n_features, include_target) for i in range(len(test_goals))]
-    elif experiment == 'cartpole':
-        train_tasks = [Cartpole_PHI(i, n_features, goal) for i, goal in enumerate(goals)]
-        test_tasks = [Cartpole_PHI(i, n_features, goal) for i, goal in enumerate(test_goals)]
-
-    return train_tasks, test_tasks
+    device = get_torch_device()
 
 
-def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshape_axis: int = 1):
-    model_params = sfdqn_params['model_params']
+    # tasks
+    def generate_tasks(include_target, experiment='reacher'):
+        if experiment == 'reacher':
+            train_tasks = [Reacher_PHI(all_goals, i, n_features,  include_target) for i in range(len(goals))]
+            test_tasks = [Reacher_PHI(all_goals, i + len(goals), n_features, include_target) for i in range(len(test_goals))]
+        elif experiment == 'cartpole':
+            train_tasks = [Cartpole_PHI(i, n_features, goal) for i, goal in enumerate(goals)]
+            test_tasks = [Cartpole_PHI(i, n_features, goal) for i, goal in enumerate(test_goals)]
+        elif experiment == 'hopper':
+            train_tasks = [Hopper_PHI(goal, n_features) for i, goal in enumerate(goals)]
+            test_tasks = [Hopper_PHI(goal, n_features) for i, goal in enumerate(test_goals)]
 
-    layers = OrderedDict() 
-    number_layers = len(model_params['n_neurons'])
+        return train_tasks, test_tasks
 
-    # Layers settings
-    first_layer_neurons = model_params['n_neurons'][0]
-    last_layer_neurons = model_params['n_neurons'][-1]
 
-    # Input Layer
-    input_layer = torch.nn.Linear(num_inputs, first_layer_neurons)
-    layers['layer_input'] = input_layer
-    
-    # Hidden Layer
-    for index, n_neurons, activation in zip(range(number_layers), model_params['n_neurons'], model_params['activations']):
-        linear = torch.nn.Linear(n_neurons, n_neurons)
-        activation_function = get_activation(activation)()
-        layers[f'layer_{index}'] = linear
-        layers[f'activation_layer_{index}'] = activation_function
+    def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshape_axis: int = 1):
+        model_params = sfdqn_params['model_params']
 
-    # Output Layers
-    output_layer = torch.nn.Linear(last_layer_neurons, output_dim)
-    unflatten_layer = torch.nn.Unflatten(reshape_axis, reshape_dim)
-    layers['layer_output'] = output_layer
-    layers['layer_unflatten'] = unflatten_layer
+        layers = OrderedDict()
+        number_layers = len(model_params['n_neurons'])
 
-    model = torch.nn.Sequential(layers).to(device)
-    loss = torch.nn.MSELoss().to(device)
+        # Layers settings
+        first_layer_neurons = model_params['n_neurons'][0]
+        last_layer_neurons = model_params['n_neurons'][-1]
 
-    return model, loss, None
+        # Input Layer
+        input_layer = torch.nn.Linear(num_inputs, first_layer_neurons)
+        layers['layer_input'] = input_layer
 
-def replay_buffer_handle():
-    return ReplayBuffer(**sfdqn_params['buffer_params'])
+        # Hidden Layer
+        for index, n_neurons, activation in zip(range(number_layers), model_params['n_neurons'], model_params['activations']):
+            linear = torch.nn.Linear(n_neurons, n_neurons)
+            activation_function = get_activation(activation)()
+            layers[f'layer_{index}'] = linear
+            layers[f'activation_layer_{index}'] = activation_function
 
-def main_train(environment):
-    train_tasks, test_tasks = generate_tasks(False, environment)
-    # build SFDQN    
-    print('building SFDQN Sequential')
-    print(f'PyTorch Seed {torch.seed()}')
-    print(f'Hyperparamters {config_params}')
-    deep_sf = DeepSF(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
-    sfdqn = SFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle,
-                  **sfdqn_params, **agent_params)
-    
-    # Pre train
-    print('pre training SFDQN sequential')
-    sfdqn.pre_train(train_tasks, 5_000) # 5_000 steps on each task. as pre train
-    
-    # train SFDQN
-    print('training SFDQN  Sequential')
-    sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
-    print('End Training SFDQN Sequential')
+        # Output Layers
+        output_layer = torch.nn.Linear(last_layer_neurons, output_dim)
+        unflatten_layer = torch.nn.Unflatten(reshape_axis, reshape_dim)
+        layers['layer_output'] = output_layer
+        layers['layer_unflatten'] = unflatten_layer
 
-######
-main_train('cartpole')
+        model = torch.nn.Sequential(layers).to(device)
+        loss = torch.nn.MSELoss().to(device)
+
+        return model, loss, None
+
+    def replay_buffer_handle():
+        return ReplayBuffer(**sfdqn_params['buffer_params'])
+
+    def main_train():
+        train_tasks, test_tasks = generate_tasks(False, environment_name)
+        # build SFDQN
+        print('building SFDQN Sequential')
+        print(f'PyTorch Seed {torch.seed()}')
+        print(f'Hyperparamters {config_params}')
+        deep_sf = DeepSF(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
+        sfdqn = SFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle,
+                      **sfdqn_params, **agent_params)
+
+        # Pre train
+        print('pre training SFDQN sequential')
+        sfdqn.pre_train(train_tasks, 5_000) # 5_000 steps on each task. as pre train
+
+        # train SFDQN
+        print('training SFDQN  Sequential')
+        sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
+        print('End Training SFDQN Sequential')
+
+    ######
+    main_train()
