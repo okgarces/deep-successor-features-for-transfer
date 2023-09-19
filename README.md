@@ -3,23 +3,17 @@
 This code is a fork of Gimelfarb repository. Has the following changes:
 1. Use PyTorch instead of Tensorflow.
 2. Implement Transformed Successor Features.
-
-# successor-features-for-transfer
-A reusable framework and independent implementation for successor features (SF) for transfer in (deep) reinforcement learning using keras, based on [1].
-
-Discrete four-room domain:
-
-![](https://github.com/mike-gimelfarb/successor-features-for-transfer/blob/main/source/figures/sfql_return.png)
-
-Deep learning for reacher domain (MuJoCo):
-
-![](https://github.com/mike-gimelfarb/successor-features-for-transfer/blob/main/source/figures/sfdqn_return.png)
+3. Refactor to support only one file.
 
 Currently supports:
-- tabular SF representations for discrete environments, based on an efficient hash table representation
-- deep neural network SF representations for large or continuous-state environments, based on keras; allows existing keras models or custom architectures (e.g. CNNs) as inputs for easy training and tuning
+- deep neural network SF representations for large or continuous-state environments.
 - tasks with pre-defined state features only, although support for training features on-the-fly may be added later
 - tasks structured according to the OpenAI gym framework
+
+Current tasks:
+- Reacher environment with 7 discrete actions
+- Hopper with 27 discrete actions
+- Cartpole v2.0
 
 # Requirements
 - python 3.8 or later
