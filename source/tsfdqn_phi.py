@@ -660,8 +660,7 @@ class TSFDQN:
 
         with torch.no_grad():
             next_psis = target_psi_model(next_states)[indices, next_actions,:]
-
-        targets = transformed_phis + gammas * next_psis
+            targets = transformed_phis + gammas * next_psis
 
         # train the SF network
         merge_current_target_psi = current_psi.clone()
@@ -1112,7 +1111,7 @@ class TSFDQN:
 ################################################################################################################
 ################################################################################################################
 
-environment_name = 'hopper'
+environment_name = 'cartpole'
 
 if __name__ == '__main__':
      # -*- coding: UTF-8 -*-
