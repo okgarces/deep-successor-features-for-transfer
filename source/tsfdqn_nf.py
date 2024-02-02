@@ -1,17 +1,16 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import nn
 
-from utils.torch import get_torch_device, update_models_weights
+from utils.torch import update_models_weights
 from utils.logger import get_logger_level
 import random
 
 
-device = get_torch_device()
-
 class ReplayBuffer:
     
-    def __init__(self, *args, n_samples=1000000, n_batch=32, **kwargs):
+    def __init__(self, *args, n_samples=1000000, n_batch=32, device=None, **kwargs):
         """
         Creates a new randomized replay buffer.
         
@@ -24,6 +23,7 @@ class ReplayBuffer:
         """
         self.n_samples = n_samples
         self.n_batch = n_batch
+        self.device = device
 
         # When initialize run reset()
         self.reset()
@@ -57,12 +57,12 @@ class ReplayBuffer:
         if self.size < self.n_batch: return None
         indices = np.random.randint(low=0, high=self.size, size=(self.n_batch,))
         states, actions, rewards, phis, next_states, gammas = zip(*self.buffer[indices])
-        states = torch.vstack(states).to(device)
-        actions = torch.tensor(actions).to(device)
-        rewards = torch.vstack(rewards).to(device)
-        phis = torch.vstack(phis).to(device)
-        next_states = torch.vstack(next_states).to(device)
-        gammas = torch.tensor(gammas).to(device)
+        states = torch.vstack(states).to(self.device)
+        actions = torch.tensor(actions).to(self.device)
+        rewards = torch.vstack(rewards).to(self.device)
+        phis = torch.vstack(phis).to(self.device)
+        next_states = torch.vstack(next_states).to(self.device)
+        gammas = torch.tensor(gammas).to(self.device)
         return states, actions, rewards, phis, next_states, gammas
     
     def append(self, state: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, phi: torch.Tensor, next_state: torch.Tensor, gamma: torch.Tensor) -> None:
@@ -98,7 +98,7 @@ class DeepTSF:
     function approximators.
     """
     
-    def __init__(self, pytorch_model_handle, use_true_reward, target_update_ev=1000, **kwargs):
+    def __init__(self, pytorch_model_handle, use_true_reward, target_update_ev=1000, device=None, **kwargs):
         """
         Creates a new deep representation of successor features.
         
@@ -120,7 +120,7 @@ class DeepTSF:
         self.pytorch_model_handle = pytorch_model_handle
         self.target_update_ev = target_update_ev
         
-        self.device = get_torch_device()
+        self.device = device
     
     def reset(self):
         """
@@ -327,29 +327,93 @@ class DeepTSF:
 
 
 ################################## NF ######################################################
+# Implementation adapted from github
+class Planar(nn.Module):
 
-class PlanarFlow(torch.nn.Module):
+    """Planar flow as introduced in [arXiv: 1505.05770](https://arxiv.org/abs/1505.05770)
+    ```
+        f(z) = z + u * h(w * z + b)
+    ```
+    """
 
-    def __init__(self, dim):
+    def __init__(self, shape, act="tanh", u=None, w=None, b=None):
+        """Constructor of the planar flow
+
+        Args:
+          shape: shape of the latent variable z
+          h: nonlinear function h of the planar flow (see definition of f above)
+          u,w,b: optional initialization for parameters
+        """
         super().__init__()
-        self.weight = torch.nn.Parameter(torch.Tensor(1, dim)).to(device)
-        self.bias = torch.nn.Parameter(torch.Tensor(1)).to(device)
-        self.scale = torch.nn.Parameter(torch.Tensor(1, dim)).to(device)
-        self.tanh = torch.nn.Tanh()
+        lim_w = np.sqrt(2.0 / np.prod(shape))
+        lim_u = np.sqrt(2)
 
-        self.reset_parameters()
+        if u is not None:
+            self.u = nn.Parameter(u)
+        else:
+            self.u = nn.Parameter(torch.empty(shape)[None])
+            nn.init.uniform_(self.u, -lim_u, lim_u)
+        if w is not None:
+            self.w = nn.Parameter(w)
+        else:
+            self.w = nn.Parameter(torch.empty(shape)[None])
+            nn.init.uniform_(self.w, -lim_w, lim_w)
+        if b is not None:
+            self.b = nn.Parameter(b)
+        else:
+            self.b = nn.Parameter(torch.zeros(1))
 
-    def reset_parameters(self):
-        self.weight.data.uniform_(-0.01, 0.01)
-        self.scale.data.uniform_(-0.01, 0.01)
-        self.bias.data.uniform_(-0.01, 0.01)
+        self.act = act
+        if act == "tanh":
+            self.h = torch.tanh
+        elif act == "leaky_relu":
+            self.h = torch.nn.LeakyReLU(negative_slope=0.2)
+        else:
+            raise NotImplementedError("Nonlinearity is not implemented.")
 
-    def forward(self, z):
-        activation = F.linear(z, self.weight, self.bias)
-        return z + self.scale * self.tanh(activation)
+    def forward(self, z, return_log_det=False):
+        lin = torch.sum(self.w * z, list(range(1, self.w.dim())),
+                        keepdim=True) + self.b
+        inner = torch.sum(self.w * self.u)
+        u = self.u + (torch.log(1 + torch.exp(inner)) - 1 - inner) \
+            * self.w / torch.sum(self.w ** 2)  # constraint w.T * u > -1
+        if self.act == "tanh":
+            h_ = lambda x: 1 / torch.cosh(x) ** 2
+        elif self.act == "leaky_relu":
+            h_ = lambda x: (x < 0) * (self.h.negative_slope - 1.0) + 1.0
+
+        z_ = z + u * self.h(lin)
+
+        if return_log_det:
+            log_det = torch.log(torch.abs(1 + torch.sum(self.w * u) * h_(lin.reshape(-1))))
+            return z_, log_det
+        return  z_
+
+    def inverse(self, z, return_log_det=False):
+        if self.act != "leaky_relu":
+            raise NotImplementedError("This flow has no algebraic inverse.")
+        lin = torch.sum(self.w * z, list(range(1, self.w.dim()))) + self.b
+        a = (lin < 0) * (
+            self.h.negative_slope - 1.0
+        ) + 1.0  # absorb leakyReLU slope into u
+        inner = torch.sum(self.w * self.u)
+        u = self.u + (torch.log(1 + torch.exp(inner)) - 1 - inner) \
+            * self.w / torch.sum(self.w ** 2)
+        dims = [-1] + (u.dim() - 1) * [1]
+        u = a.reshape(*dims) * u
+        inner_ = torch.sum(self.w * u, list(range(1, self.w.dim())))
+        z_ = z - u * (lin / (1 + inner_)).reshape(*dims)
+
+        if return_log_det:
+            log_det = -torch.log(torch.abs(1 + inner_))
+            return z_, log_det
+
+        return z_
 
     @classmethod
     def build_planar_flow(cls, input_dim, output_dim, n_affine_flows):
+        raise Exception('This is being modified. It is not implemented yet.')
+        # TODO to implement later
         flows = [cls(input_dim).to(device) for _ in range(n_affine_flows)]
         # Last input 
         last_layer = torch.nn.Linear(input_dim, output_dim, bias=True, device=device)
@@ -361,7 +425,7 @@ class PlanarFlow(torch.nn.Module):
 class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
-                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, **kwargs):
+                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -412,7 +476,7 @@ class TSFDQN:
         self.hyperparameters = kwargs.get('hyperparameters', {})
 
         self.logger = get_logger_level()
-        self.device = get_torch_device()
+        self.device = device
         self.test_tasks_weights = []
 
         # Sequential Successor Features
@@ -436,8 +500,6 @@ class TSFDQN:
         
         # reset counter history
         self.cum_reward = 0.
-        self.reward_hist = []
-        self.cum_reward_hist = []
 
         # Successor feature reset
         self.sf.reset()
@@ -455,7 +517,7 @@ class TSFDQN:
         
         # sample from a Bernoulli distribution with parameter epsilon
         if random.random() <= self.epsilon:
-            a = torch.tensor(random.randrange(self.n_actions)).to(device)
+            a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
         else:
             a = torch.argmax(q)
         
@@ -487,10 +549,11 @@ class TSFDQN:
             self.episode += 1
             self.steps_since_last_episode = 0
             self.episode_reward = self.reward_since_last_episode
-            self.reward_since_last_episode = 0.   
-            if self.episode > 1:
-                self.episode_reward_hist.append(self.episode_reward)  
-        
+            self.reward_since_last_episode = 0.
+
+            # Log when new episode
+            self.logger.log({f'train/source_task{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
+
         # compute the Q-values in the current state
         q = self.get_Q_values(self.s, self.s_enc)
         
@@ -514,23 +577,15 @@ class TSFDQN:
         self.steps += 1
         self.reward += r
         self.steps_since_last_episode += 1
-        self.reward_since_last_episode += r
+        self.reward_since_last_episode += r.detach().cpu().numpy()
         self.cum_reward += r
         
         if self.steps_since_last_episode >= self.T:
             self.new_episode = True
-            
-        if self.steps % self.save_ev == 0:
-            self.reward_hist.append(self.reward)
-            self.cum_reward_hist.append(self.cum_reward)
         
         # viewing
         if viewer is not None and self.episode % n_view_ev == 0:
             viewer.update()
-        
-        # Remove printing
-        #if self.steps % self.print_ev == 0:
-        #    print('\t'.join(self.get_progress_strings()))
 
     def set_active_training_task(self, index):
         """
@@ -550,7 +605,6 @@ class TSFDQN:
         self.steps_since_last_episode, self.reward_since_last_episode = 0, 0.
         self.steps, self.reward = 0, 0.
         self.epsilon = self.epsilon_init
-        self.episode_reward_hist = []
         
         # Sequential
         self.buffer = self.buffers[index]
@@ -568,27 +622,13 @@ class TSFDQN:
 
     def _init_g_function(self, states_dim, output_dim, n_coupling_layers):
         # Number of planarflows = 10
-        g_function = PlanarFlow.build_planar_flow(states_dim, output_dim, n_coupling_layers)
-        #with torch.no_grad():
-        #    # 0.001 and 0.01 got from analysis between the max values of g_function [-220, 200] and phi prefixed is [-1.5, 1]
-        #    weights = torch.eye(features_dim, states_dim).to(self.device).requires_grad_(False)
-        #    bias = torch.Tensor(1, features_dim).uniform_(0.01,0.1).to(self.device).requires_grad_(False)
-        #    g_function.weight = torch.nn.Parameter(weights, requires_grad=False)
-        #    g_function.bias = torch.nn.Parameter(bias, requires_grad=False)
+        g_function = Planar(states_dim).to(self.device)
         return g_function
 
     def _init_h_function(self, input_dim, features_dim):
         # TODO Remove weights clamp and initial weights
-        # h : |d| -> |d|, d features dimension
         # This affine transformation
         h_function = torch.nn.Linear(input_dim, features_dim, bias=True, device=self.device)
-        #with torch.no_grad():
-        #    # 0.001 and 0.01 got from analysis between the max values of g_function [-220, 200] and phi prefixed is [-1.5, 1]
-        #    weights = torch.Tensor(features_dim, features_dim).uniform_(0.001,0.01).to(self.device).requires_grad_(False)
-        #    bias = torch.Tensor(1, features_dim).uniform_(0.001,0.01).to(self.device).requires_grad_(False)
-        #    h_function.weight = torch.nn.Parameter(weights, requires_grad=True)
-        #    h_function.bias = torch.nn.Parameter(bias, requires_grad=True)
-
         return h_function
 
     def _init_omega(self, num_source_tasks):
@@ -605,17 +645,17 @@ class TSFDQN:
         if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
             losses = self.update_successor(transitions, self.task_index, self.use_gpi)
-        
-            if isinstance(losses, tuple):
-                total_loss, psi_loss, phi_loss = losses
-                
-                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [self.hyperparameters['beta_loss_coefficient']], self.total_training_steps)
 
-        # Print weights for Reward Mapper
-        if self.total_training_steps % 1000 == 0:
-            task_w = self.sf.fit_w[self.task_index]
-            print(f'Current task {self.task_index} Reward Mapper {task_w.weight}')
-            print(f'Current omegas {self.task_index} OMEGAS Weights {self.omegas}')
+            # Print weights for Reward Mapper
+            if self.total_training_steps % 1000 == 0:
+                if isinstance(losses, tuple):
+                    total_loss, psi_loss, phi_loss = losses
+                    self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+
+                task_w = self.sf.fit_w[self.task_index]
+                self.logger.log({f'train/source_task_{self.task_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
 
     def update_successor(self, transitions, policy_index, use_gpi=True):
         if transitions is None:
@@ -663,7 +703,6 @@ class TSFDQN:
         # train the SF network
         merge_current_target_psi = current_psi.clone()
         merge_current_target_psi[indices, actions,:] = targets
-        # psi_model.train_on_batch(states, current_psi)
 
         optim.zero_grad()
 
@@ -677,57 +716,57 @@ class TSFDQN:
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
-        if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
-            print(f'########### BEGIN #################')
-            print(f'Affine transformed states {torch.norm(affine_transformed_states, dim=0)} task {policy_index}')
-            print(f'g functions values states {torch.norm(transformed_state, dim=0)} task {policy_index}')
-            print(f'g functions values next states {torch.norm(transformed_next_state, dim=0)} task {policy_index}')
-            print(f'phis values {torch.norm(phis, dim=0)} task {policy_index}')
-            print(f'Policy Index {policy_index}')
-            print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
-
-            accum_grads = 0
-            accum_weights = 0
-            for params in psi_model.parameters():
-                accum_grads += torch.norm(params.grad)
-                accum_weights += torch.norm(params.data)
-            print(f'Gradients of Psi {accum_grads}')
-            print(f'Psi weights {accum_weights}')
-
-            accum_grads = 0
-            accum_weights = 0
-            for params in g_function.parameters():
-                accum_grads += torch.norm(params.grad)
-                accum_weights += torch.norm(params.data)
-            print(f'Gradients of G function {accum_grads}')
-            print(f'G function weights {accum_weights}')
-
-            accum_grads = 0
-            accum_weights = 0
-            for params in self.h_function.parameters():
-                accum_grads += torch.norm(params.grad)
-                accum_weights += torch.norm(params.data)
-            print(f'Gradients of H function {accum_grads}')
-            print(f'H function weights {accum_weights}')
-
-            accum_grads = 0
-            accum_weights = 0
-            for params in task_w.parameters():
-                accum_grads += torch.norm(params.grad)
-                accum_weights += torch.norm(params.data)
-                print(f'W weights {params.data}')
-            print(f'Gradients of W {accum_grads}')
-            print(f'W weights {accum_weights}')
-
-            accum_grads = 0
-            accum_weights = 0
-            for params in target_psi_model.parameters():
-                if params.grad is not None:
-                    accum_grads += torch.norm(params.grad)
-                accum_weights += torch.norm(params.data)
-            print(f'Gradients of Psi Target {accum_grads}')
-            print(f'Weights of Psi Target {accum_weights}')
-            print(f'########### END #################')
+        # if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
+        #     print(f'########### BEGIN #################')
+        #     print(f'Affine transformed states {torch.norm(affine_transformed_states, dim=0)} task {policy_index}')
+        #     print(f'g functions values states {torch.norm(transformed_state, dim=0)} task {policy_index}')
+        #     print(f'g functions values next states {torch.norm(transformed_next_state, dim=0)} task {policy_index}')
+        #     print(f'phis values {torch.norm(phis, dim=0)} task {policy_index}')
+        #     print(f'Policy Index {policy_index}')
+        #     print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
+        #
+        #     accum_grads = 0
+        #     accum_weights = 0
+        #     for params in psi_model.parameters():
+        #         accum_grads += torch.norm(params.grad)
+        #         accum_weights += torch.norm(params.data)
+        #     print(f'Gradients of Psi {accum_grads}')
+        #     print(f'Psi weights {accum_weights}')
+        #
+        #     accum_grads = 0
+        #     accum_weights = 0
+        #     for params in g_function.parameters():
+        #         accum_grads += torch.norm(params.grad)
+        #         accum_weights += torch.norm(params.data)
+        #     print(f'Gradients of G function {accum_grads}')
+        #     print(f'G function weights {accum_weights}')
+        #
+        #     accum_grads = 0
+        #     accum_weights = 0
+        #     for params in self.h_function.parameters():
+        #         accum_grads += torch.norm(params.grad)
+        #         accum_weights += torch.norm(params.data)
+        #     print(f'Gradients of H function {accum_grads}')
+        #     print(f'H function weights {accum_weights}')
+        #
+        #     accum_grads = 0
+        #     accum_weights = 0
+        #     for params in task_w.parameters():
+        #         accum_grads += torch.norm(params.grad)
+        #         accum_weights += torch.norm(params.data)
+        #         print(f'W weights {params.data}')
+        #     print(f'Gradients of W {accum_grads}')
+        #     print(f'W weights {accum_weights}')
+        #
+        #     accum_grads = 0
+        #     accum_weights = 0
+        #     for params in target_psi_model.parameters():
+        #         if params.grad is not None:
+        #             accum_grads += torch.norm(params.grad)
+        #         accum_weights += torch.norm(params.data)
+        #     print(f'Gradients of Psi Target {accum_grads}')
+        #     print(f'Weights of Psi Target {accum_weights}')
+        #     print(f'########### END #################')
 
         optim.step()
 
@@ -771,49 +810,6 @@ class TSFDQN:
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
 
-
-
-    def get_progress_dict(self):
-        if self.sf is not None:
-            gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
-        else:
-            gpi_percent = None
-            w_error = None
-
-        return_dict = {
-            'task': self.task_index,
-            'steps': self.total_training_steps,
-            'episodes': self.episode,
-            'eps': self.epsilon,
-            'ep_reward': self.episode_reward,
-            'reward': self.reward,
-            'reward_hist': self.reward_hist,
-            'cum_reward': self.cum_reward,
-            'cum_reward_hist': self.cum_reward_hist,
-            'GPI%': gpi_percent,
-            'w_err': w_error
-            }
-        return return_dict
-    
-    def get_progress_strings(self):
-        """
-        Returns a string that displays the agent's learning progress. This includes things like
-        the current training task index, steps and episodes of training, exploration parameter,
-        the previous episode reward obtained and cumulative reward, and other information
-        depending on the current implementation.
-        """
-        sample_str = 'task \t {} \t steps \t {} \t episodes \t {} \t eps \t {:.4f}'.format(
-            self.task_index, self.steps, self.episode, self.epsilon)
-        reward_str = 'ep_reward \t {:.4f} \t reward \t {:.4f}'.format(
-            self.episode_reward, self.reward)
-
-        gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-        w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
-        gpi_str = 'GPI% \t {:.4f} \t w_err \t {:.4f}'.format(gpi_percent, w_error)
-
-        return sample_str, reward_str, gpi_str
-            
     def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1):
         if viewers is None: 
             viewers = [None] * len(train_tasks)
@@ -878,13 +874,24 @@ class TSFDQN:
                     if t % n_test_ev == 0:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
-                            R = self.test_agent(test_task, test_index)
-                            Rs.append(R)
-                        avg_R = torch.mean(torch.Tensor(Rs).to(self.device))
+                            R, accum_loss, total_phi_loss, total_psi_loss = self.test_agent(test_task, test_index)
+                            Rs.append(R.detach().cpu().numpy())
+
+                            self.logger.log({f'eval/target_task_{test_index}/omegas': str(self.omegas[test_index].clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+                            self.logger.log({f'eval/target_task_{test_index}/total_reward': R.detach().cpu().numpy().item(), 'timesteps': self.total_training_steps})
+                            self.logger.log({f'losses/target_task_{test_index}/total_loss': accum_loss, 'timesteps': self.total_training_steps})
+                            self.logger.log({f'losses/target_task_{test_index}/phi_loss': total_phi_loss, 'timesteps': self.total_training_steps})
+                            self.logger.log({f'losses/target_task_{test_index}/psi_loss': total_psi_loss, 'timesteps': self.total_training_steps})
+
+                        avg_R = np.mean(Rs)
                         return_data.append(avg_R)
-                        self.logger.log_progress(self.get_progress_dict())
-                        self.logger.log_average_reward(avg_R, self.total_training_steps)
-                        self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(self.device)), self.total_training_steps)
+
+                        # log average return
+                        self.logger.log({f'eval/average_reward': avg_R, 'timesteps': self.total_training_steps})
+
+
+                        # Every n_test_ev we can log the current progress in source task.
+                        self.logger.log({f'train/source_task_{self.task_index}/total_reward': self.reward.clone().detach().cpu().numpy().item(), 'timesteps': self.total_training_steps})
 
                     self.total_training_steps += 1
         return return_data
@@ -921,7 +928,7 @@ class TSFDQN:
             s1_enc = self.encoding(s1)
             a1 = self.get_test_action(s1_enc, w, omegas)
 
-            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, r, s_enc, a, s1_enc, a1)
+            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1)
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
@@ -937,17 +944,14 @@ class TSFDQN:
                 break
 
         # Log accum loss for T from in a random way
-        if(self.total_training_steps % 5000 == 0):
-            beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
-            self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, total_phi_loss, total_psi_loss, test_index, beta_loss_coefficient, self.T))
-            self.logger.log_omegas_learning_rate(optim.param_groups[1]['lr'], test_index, (self.total_training_steps))
+        #beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
 
         # Fix it seems omegas are being cached
         self.omegas[test_index] = omegas
 
-        return R
+        return R, accum_loss, total_phi_loss, total_psi_loss
 
-    def update_test_reward_mapper(self, w_approx, omegas, optim, task, r, s, a, s1, a1):
+    def update_test_reward_mapper(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1):
 
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
@@ -1012,17 +1016,7 @@ class TSFDQN:
             epsilon = 1e-7
             omegas.clamp_(epsilon) 
 
-        if(self.total_training_steps % 1000 == 0 and random.randint(1, 1000) < 10):
-            print(f'########### BEGIN TARGET TASKS #################')
-            print(f'Target Task Index {task}')
-            print(f'Target Task {task} Omegas Gradients {omegas.grad}')
-            print(f'Target Task {task} Weights {w_approx.weight}')
-            print(f'Target Task {task} Weights Gradients {w_approx.weight.grad}')
-            print(f'Target Task {task} affine states {affine_states.squeeze(0)}')
-            print(f'Target Task {task} phi values {phi}')
-            print(f'Target Task {task} transformed state {weighted_states}')
-
-            print(f'########### END TARGET TASKS #################')
+        # Possible we can log the phi values, the transformed states.
 
         # h function train
         self.h_function.train()
