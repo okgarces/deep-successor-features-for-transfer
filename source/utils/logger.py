@@ -3,10 +3,10 @@ from torch.utils.tensorboard import SummaryWriter
 from abc import abstractmethod
 import time
 
-logger = None 
+logger = None
 
 class LoggerBase(object):
-    
+
     def __init__(self, debug=True):
         self.debug = debug
 
@@ -21,7 +21,7 @@ class LoggerBase(object):
     @abstractmethod
     def log_histogram(self, category, values):
         raise NotImplemented()
-    
+
     ###### Per task
     def log_progress(self, progress):
         task_id = progress.get('task') + 1
@@ -91,7 +91,7 @@ class LoggerBase(object):
 
     def log_source_performance(self, task_id, reward, training_steps):
         self.log_scalar(f'Source_Tasks/Rewards/task_{task_id + 1}', reward, training_steps)
- 
+
     def finalize(self):
         raise NotImplemented()
 
@@ -110,7 +110,7 @@ class Logger(LoggerBase):
 
     def log_histogram(self, category, values):
         self.writer.add_histogram(category, values)
-    
+
     def finalize(self):
         self.writer.flush()
         self.writer.close()
@@ -125,14 +125,53 @@ class MockLogger(LoggerBase):
 
     def log_histogram(self, category, values):
         print(f'{(category)} Values: {values}')
-    
+
     def finalize(self):
         pass
 
-def set_logger_level(use_logger=False):
+############################33
+from time import gmtime, strftime
+import numpy as np
+import pandas as pd
+import json
+
+class LoggerCSV:
+    SOURCE_TASK = 'source'
+    TARGET_TASK = 'target'
+
+    HEADERS = ['task_id', 'reward', 'step', 'accum_loss', 'q_loss', 'psi_loss', 'phi_loss']
+
+    def __init__(self, root_path, prefix=None):
+        super().__init__()
+        prefix = prefix+'_' if prefix is not None else ''
+        self.source_tasks_file = f'{root_path}results/{prefix}source_performance_{strftime("%d_%b_%Y_%H_%M_%S", gmtime())}.csv'
+        self.target_tasks_file = f'{root_path}results/{prefix}target_performance_{strftime("%d_%b_%Y_%H_%M_%S", gmtime())}.csv'
+        self.log_task_file = f'{root_path}results/{prefix}log_performance_{strftime("%d_%b_%Y_%H_%M_%S", gmtime())}.csv'
+
+    def log(self, log_dictionary):
+        filename = self.log_task_file
+        with open(filename, 'a') as f:
+            f.write(json.dumps(str(log_dictionary)) + '\n')
+            # np.savetxt(f, json.dumps(log_dictionary), delimiter=',', newline='\n')
+
+    def log_agent_performance(self, task, reward, step, accum_loss, *args, **kwargs):
+        values = np.array([task, reward, step, accum_loss, *args])
+        type_task = kwargs.get('type_task', self.SOURCE_TASK)
+        filename = self.source_tasks_file if type_task == self.SOURCE_TASK else self.target_tasks_file
+
+        with open(filename, 'a') as f:
+            np.savetxt(f, np.column_stack(values), delimiter=',', newline='\n')
+
+    def load_text(self, type_task='source'):
+        filename = self.source_tasks_file if type_task == self.SOURCE_TASK else self.target_tasks_file
+
+        return pd.DataFrame(np.loadtxt(filename, delimiter=','))
+
+
+def set_logger_level(use_logger=False, root_path=''):
     global logger
     if logger is None:
-        logger = Logger() if use_logger else MockLogger()
+        logger = LoggerCSV(root_path) if use_logger else MockLogger()
         return logger
     return logger
 
