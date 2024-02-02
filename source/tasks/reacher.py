@@ -6,12 +6,12 @@ import torch
 import numpy as np
 
 from tasks.task import Task
-from utils.torch import get_torch_device
-
 
 class Reacher(Task):
     
-    def __init__(self, target_positions, task_index, include_target_in_state=False):
+    def __init__(self, target_positions, task_index, include_target_in_state=False, device=None):
+        super(Reacher, self).__init__(device)
+
         self.target_positions = target_positions
         self.task_index = task_index
         self.target_pos = target_positions[task_index]
@@ -25,7 +25,7 @@ class Reacher(Task):
             for a2 in actions:
                 self.action_dict[len(self.action_dict)] = (a1, a2)
 
-        self.device = get_torch_device()
+        self.device = device
         
     def clone(self):
         return Reacher(self.target_positions, self.task_index, self.include_target_in_state)

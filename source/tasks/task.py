@@ -3,6 +3,8 @@ class Task:
     """
     An abstract representation of an MDP with arbitrary state space and finite action space.
     """
+    def __init__(self, device=None):
+        self.device = device
     
     def clone(self):
         """
