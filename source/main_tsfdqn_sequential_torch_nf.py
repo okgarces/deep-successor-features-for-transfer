@@ -1,6 +1,6 @@
 # -*- coding: UTF-8 -*- 
 from utils.config import parse_config_file
-from utils.torch import set_torch_device, get_activation
+from utils.torch import set_torch_device, get_activation, set_random_seed
 from utils.logger import set_logger_level
 from utils.types import ModelTuple
 
@@ -77,6 +77,7 @@ def replay_buffer_handle():
     return ReplayBuffer(sfdqn_params['buffer_params'], device=device)
 
 if __name__ == '__main__':
+    set_random_seed(26)
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
     print('building TSFDQN With NF Sequential')

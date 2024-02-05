@@ -896,22 +896,27 @@ class TSFDQN:
                     self.total_training_steps += 1
         return return_data
     
-    def get_test_action(self, s_enc, w, omegas):
+    def get_test_action(self, s_enc, w, omegas, use_gpi_eval=True):
         with torch.no_grad():
             if random.random() <= self.test_epsilon:
                 a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
             else:
-                normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
                 successor_features = self.sf.get_successors(s_enc)
-                tsf = torch.sum(successor_features * normalized_omegas, axis=1)
-
-                q = w(tsf)
-                # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
-                # Target TSF only Use Q-Learning
-                a = torch.argmax(q)
+                if use_gpi_eval:
+                    q = w(successor_features)[:,:,:,0]
+                    max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+                    q = q[:, max_task, :]
+                    a = torch.argmax(q)
+                else:
+                    normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+                    tsf = torch.sum(successor_features * normalized_omegas, axis=1)
+                    q = w(tsf)
+                    # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
+                    # Target TSF only Use Q-Learning
+                    a = torch.argmax(q)
             return a
             
-    def test_agent(self, task, test_index):
+    def test_agent(self, task, test_index, use_gpi_eval=False, learn_omegas=True):
         R = 0.0
         w, optim, scheduler = self.test_tasks_weights[test_index]
         omegas = self.omegas[test_index]
@@ -923,12 +928,15 @@ class TSFDQN:
         total_psi_loss = 0
 
         for target_ev_step in range(self.T):
-            a = self.get_test_action(s_enc, w, omegas)
+            a = self.get_test_action(s_enc, w, omegas, use_gpi_eval)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
-            a1 = self.get_test_action(s1_enc, w, omegas)
 
-            loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1)
+            if learn_omegas:
+                a1 = self.get_test_action(s1_enc, w, omegas, use_gpi_eval)
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1)
+            else:
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
@@ -951,7 +959,24 @@ class TSFDQN:
 
         return R, accum_loss, total_phi_loss, total_psi_loss
 
-    def update_test_reward_mapper(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1):
+    def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
+        # Return Loss
+        phi = task.features(s, a, s1)
+        loss_task = torch.nn.MSELoss()
+
+        with torch.no_grad():
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+
+        optim.zero_grad()
+
+        r_fit = w_approx(phi)
+        loss = loss_task(r_fit, r_tensor)
+        loss.backward()
+
+        optim.step()
+        return loss, torch.tensor(0), torch.tensor(0)
+
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1):
 
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
