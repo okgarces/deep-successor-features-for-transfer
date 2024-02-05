@@ -896,14 +896,16 @@ class TSFDQN:
                     self.total_training_steps += 1
         return return_data
     
-    def get_test_action(self, s_enc, w, omegas, use_gpi_eval=True):
+    def get_test_action(self, s_enc, w, omegas, use_gpi_eval=False, learn_omegas=True):
         with torch.no_grad():
             if random.random() <= self.test_epsilon:
                 a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
             else:
                 successor_features = self.sf.get_successors(s_enc)
                 if use_gpi_eval:
-                    q = w(successor_features)[:,:,:,0]
+                    q = w(successor_features)[:, :, :, 0]
+                    if learn_omegas:
+                        q = omegas[:,:,:,0] * q
                     max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
                     q = q[:, max_task, :]
                     a = torch.argmax(q)
@@ -916,7 +918,7 @@ class TSFDQN:
                     a = torch.argmax(q)
             return a
             
-    def test_agent(self, task, test_index, use_gpi_eval=False, learn_omegas=True):
+    def test_agent(self, task, test_index, use_gpi_eval=True, learn_omegas=True):
         R = 0.0
         w, optim, scheduler = self.test_tasks_weights[test_index]
         omegas = self.omegas[test_index]
