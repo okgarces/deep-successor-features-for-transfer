@@ -9,6 +9,7 @@ from tasks.reacher import Reacher
 
 import torch
 from collections import OrderedDict
+import argparse
 
 config_params = parse_config_file('reacher_dissimilar_nf.cfg')
 
@@ -29,7 +30,7 @@ sfdqn_params = config_params['SFDQN']
 
 # Config GPU for Torch and logger
 device = set_torch_device(use_gpu=use_gpu, gpu_device_index=gpu_device_index)
-logger = set_logger_level(use_logger=use_logger)
+logger = None
 
 # read parameters from config file
 
@@ -77,7 +78,18 @@ def replay_buffer_handle():
     return ReplayBuffer(sfdqn_params['buffer_params'], device=device)
 
 if __name__ == '__main__':
-    set_random_seed(26)
+    parser = argparse.ArgumentParser(description='TSFDQN Reacher environment.')
+    parser.add_argument('-seed', type=int, default=26)
+    parser.add_argument('-experiment_name', type=str, default=None)
+    parser.add_argument('-learn_omegas', type=bool, default=True)
+    parser.add_argument('-use_gpi_eval', type=bool, default=False)
+
+    args = parser.parse_args()
+
+    # Seed and set logger
+    set_random_seed(args.seed)
+    logger = set_logger_level(use_logger=use_logger, prefix=args.experiment_name)
+
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
     print('building TSFDQN With NF Sequential')
@@ -89,5 +101,6 @@ if __name__ == '__main__':
     # train SFDQN
     print('training TSFDQN With NF Sequential')
     train_tasks, test_tasks = generate_tasks(False)
-    sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
+    sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task,
+                learn_omegas=args.learn_omegas, use_gpi_eval=args.use_gpi_eval)
     print('End Training TSFDQN with NF Sequential')

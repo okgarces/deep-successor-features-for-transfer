@@ -810,7 +810,7 @@ class TSFDQN:
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
 
-    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1):
+    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval=False):
         if viewers is None: 
             viewers = [None] * len(train_tasks)
             
@@ -874,7 +874,7 @@ class TSFDQN:
                     if t % n_test_ev == 0:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
-                            R, accum_loss, total_phi_loss, total_psi_loss = self.test_agent(test_task, test_index)
+                            R, accum_loss, total_phi_loss, total_psi_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, use_gpi_eval=use_gpi_eval)
                             Rs.append(R.detach().cpu().numpy())
 
                             self.logger.log({f'eval/target_task_{test_index}/omegas': str(self.omegas[test_index].clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
