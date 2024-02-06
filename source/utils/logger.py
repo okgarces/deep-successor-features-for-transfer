@@ -168,10 +168,10 @@ class LoggerCSV:
         return pd.DataFrame(np.loadtxt(filename, delimiter=','))
 
 
-def set_logger_level(use_logger=False, root_path=''):
+def set_logger_level(use_logger=False, root_path='', prefix=None):
     global logger
     if logger is None:
-        logger = LoggerCSV(root_path) if use_logger else MockLogger()
+        logger = LoggerCSV(root_path, prefix) if use_logger else MockLogger()
         return logger
     return logger
 
