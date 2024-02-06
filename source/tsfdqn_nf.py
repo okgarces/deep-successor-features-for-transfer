@@ -497,9 +497,6 @@ class TSFDQN:
         """
         self.tasks = []
         self.phis = []
-        
-        # reset counter history
-        self.cum_reward = 0.
 
         # Successor feature reset
         self.sf.reset()
@@ -578,7 +575,6 @@ class TSFDQN:
         self.reward += r
         self.steps_since_last_episode += 1
         self.reward_since_last_episode += r.detach().cpu().numpy()
-        self.cum_reward += r
         
         if self.steps_since_last_episode >= self.T:
             self.new_episode = True
@@ -1051,16 +1047,3 @@ class TSFDQN:
         # Loss, phi_loss, psi_loss
         return loss, l2, l1
 
-    def get_target_reward_mapper_error(self, r, loss, phi_loss, psi_loss, task_index, target_loss_coefficient, ts):
-        return_dict = {
-            'task': task_index,
-            # Total steps and ev_frequency
-            'reward': r,
-            'steps': ((500 * (self.total_training_steps // 1000)) + ts),
-            'w_error': loss,
-            'psi_loss': psi_loss,
-            'phi_loss': phi_loss,
-            #'w_error': torch.linalg.norm(self.test_tasks_weights[task_index] - task.get_w())
-            'target_loss_coefficient': target_loss_coefficient
-            }
-        return return_dict

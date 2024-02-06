@@ -1,12 +1,11 @@
-# -*- coding: UTF-8 -*-  
-import matplotlib.pyplot as plt
+# -*- coding: UTF-8 -*-
+import argparse
 
-from agents.sfdqn_sequential import SFDQN
-from agents.buffer_sequential import ReplayBuffer
-from features.deep_sequential import DeepSF
+
+from sfdqn import SFDQN, ReplayBuffer, DeepSF
 from tasks.reacher import Reacher
 from utils.config import parse_config_file
-from utils.torch import set_torch_device, get_activation
+from utils.torch import set_torch_device, get_activation, set_random_seed
 from utils.logger import set_logger_level
 from utils.types import ModelTuple
 
@@ -32,12 +31,12 @@ sfdqn_params = config_params['SFDQN']
 
 # Config GPU for Torch and logger
 device = set_torch_device(use_gpu=use_gpu)
-logger = set_logger_level(use_logger=use_logger)
+logger = None
 
 # tasks
 def generate_tasks(include_target):
-    train_tasks = [Reacher(all_goals, i, include_target) for i in range(len(goals))]
-    test_tasks = [Reacher(all_goals, i + len(goals), include_target) for i in range(len(test_goals))]
+    train_tasks = [Reacher(all_goals, i, include_target, device=device) for i in range(len(goals))]
+    test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device) for i in range(len(test_goals))]
     return train_tasks, test_tasks
 
 
@@ -74,15 +73,24 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
     return model, loss, None
 
 def replay_buffer_handle():
-    return ReplayBuffer(sfdqn_params['buffer_params'])
+    return ReplayBuffer(**sfdqn_params['buffer_params'], device=device)
 
-def train():
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='TSFDQN Reacher environment.')
+    parser.add_argument('-seed', type=int, default=26)
+    parser.add_argument('-experiment_name', type=str, default=None)
+
+    args = parser.parse_args()
+
+    # Seed and set logger
+    set_random_seed(args.seed)
+    logger = set_logger_level(use_logger=use_logger, prefix=args.experiment_name)
+
     train_tasks, test_tasks = generate_tasks(False)
     # build SFDQN    
     print('building SFDQN Sequential')
-    print(f'PyTorch Seed {torch.seed()}')
-    deep_sf = DeepSF(pytorch_model_handle=sf_model_lambda, **sfdqn_params)
-    sfdqn = SFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle,
+    deep_sf = DeepSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
+    sfdqn = SFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device,
                   **sfdqn_params, **agent_params)
 
     # train SFDQN
@@ -91,4 +99,3 @@ def train():
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task)
     print('End Training SFDQN Sequential')
 
-train()

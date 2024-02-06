@@ -2,16 +2,14 @@
 import numpy as np
 import torch
 
-from utils.torch import get_torch_device, get_torch_device, update_models_weights
+from utils.torch import update_models_weights
 from utils.logger import get_logger_level
 import random
 
 
-device = get_torch_device()
-
 class ReplayBuffer:
     
-    def __init__(self, n_samples=1000000, n_batch=32):
+    def __init__(self, n_samples=1000000, n_batch=32, device=None):
         """
         Creates a new randomized replay buffer.
         
@@ -24,6 +22,7 @@ class ReplayBuffer:
         """
         self.n_samples = n_samples
         self.n_batch = n_batch
+        self.device = device
 
         # When initialize run reset()
         self.reset()
@@ -57,12 +56,12 @@ class ReplayBuffer:
         if self.size < self.n_batch: return None
         indices = np.random.randint(low=0, high=self.size, size=(self.n_batch,))
         states, actions, rewards, phis, next_states, gammas = zip(*self.buffer[indices])
-        states = torch.vstack(states).to(device)
-        actions = torch.tensor(actions).to(device)
-        rewards = torch.vstack(rewards).to(device)
-        phis = torch.vstack(phis).to(device)
-        next_states = torch.vstack(next_states).to(device)
-        gammas = torch.tensor(gammas).to(device)
+        states = torch.vstack(states).to(self.device)
+        actions = torch.tensor(actions).to(self.device)
+        rewards = torch.vstack(rewards).to(self.device)
+        phis = torch.vstack(phis).to(self.device)
+        next_states = torch.vstack(next_states).to(self.device)
+        gammas = torch.tensor(gammas).to(self.device)
         return states, actions, rewards, phis, next_states, gammas
     
     def append(self, state: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, phi: torch.Tensor, next_state: torch.Tensor, gamma: torch.Tensor) -> None:
@@ -97,7 +96,7 @@ class DeepSF:
     function approximators.
     """
     
-    def __init__(self, pytorch_model_handle, use_true_reward=False, target_update_ev=1000, **kwargs):
+    def __init__(self, pytorch_model_handle, use_true_reward=False, target_update_ev=1000, device=None, **kwargs):
         """
         Creates a new deep representation of successor features.
         
@@ -119,6 +118,8 @@ class DeepSF:
 
         self.pytorch_model_handle = pytorch_model_handle
         self.target_update_ev = target_update_ev
+
+        self.device = device
         
     def reset(self):
         """
@@ -194,8 +195,8 @@ class DeepSF:
         true_w = task.get_w()
 
         n_features = task.feature_dim()
-        fit_w = torch.Tensor(1, n_features).uniform_(-0.01, 0.01).to(device)
-        w_approx = torch.nn.Linear(n_features, 1, bias=False, device=device)
+        fit_w = torch.Tensor(1, n_features).uniform_(-0.01, 0.01).to(self.device)
+        w_approx = torch.nn.Linear(n_features, 1, bias=False, device=self.device)
 
         with torch.no_grad():
             w_approx.weight = torch.nn.Parameter(fit_w)
@@ -298,22 +299,25 @@ class DeepSF:
         for policy_index in range(len(self.psi)):
             predictions.append( self.get_successor(state, policy_index))
 
-        return torch.stack(predictions, axis=1).to(device)
-    
-    def update_successor(self, transitions, policy_index, use_gpi=True):
+        return torch.stack(predictions, axis=1).to(self.device)
+
+    def update_successor(self, transitions, policy_index, use_gpi=True, to_propagate=True):
         if transitions is None:
             return
-
+        use_gpi = True
         states, actions, rs, phis, next_states, gammas = transitions
         n_batch = len(gammas)
         indices = torch.arange(n_batch)
         gammas = gammas.reshape((-1, 1))
         task_w = self.fit_w[policy_index]
-         
+
+        current_policy_index_for_gpi = policy_index
+
         # next actions come from current Successor Feature
         if use_gpi:
-            q1, _ = self.GPI(next_states, policy_index)
+            q1, current_policy_index_for_gpi= self.GPI(next_states, policy_index)
             next_actions = torch.argmax(torch.max(q1, axis=1).values, axis=-1)
+
         else:
             sf = self.get_successor(next_states, policy_index)
             q1 = task_w(sf)
@@ -345,19 +349,19 @@ class DeepSF:
         loss.backward()
         
         # log gradients this is only a way to track gradients from time to time
-        if self.updates_since_target_updated[policy_index] >= self.target_update_ev - 1:
-            print(f'########### BEGIN #################')
-            print(f'Policy Index {policy_index}')
-            print(f' Update STEP # {self.updates_since_target_updated[policy_index]}')
-            for params in psi_model.parameters():
-                print(f'Gradients of Psi {params.grad}')
-
-            for params in task_w.parameters():
-                print(f'Gradients of W {params.grad}')
-
-            for params in target_psi_model.parameters():
-                print(f'Gradients of Psi Target {params.grad}')
-            print(f'########### END #################')
+        # if self.updates_since_target_updated[policy_index] >= self.target_update_ev - 1:
+        #     print(f'########### BEGIN #################')
+        #     print(f'Policy Index {policy_index}')
+        #     print(f' Update STEP # {self.updates_since_target_updated[policy_index]}')
+        #     for params in psi_model.parameters():
+        #         print(f'Gradients of Psi {params.grad}')
+        #
+        #     for params in task_w.parameters():
+        #         print(f'Gradients of W {params.grad}')
+        #
+        #     for params in target_psi_model.parameters():
+        #         print(f'Gradients of Psi Target {params.grad}')
+        #     print(f'########### END #################')
 
         optim.step()
 
@@ -368,13 +372,16 @@ class DeepSF:
             update_models_weights(psi_model, target_psi_model)
             self.updates_since_target_updated[policy_index] = 0
 
+        if to_propagate and current_policy_index_for_gpi[-1] != policy_index:
+            self.update_successor(transitions, current_policy_index_for_gpi[-1], use_gpi, to_propagate=False)
+
         return loss, l1, l2 
 
 ############################ AGENT #################################
 class SFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1, epsilon_min=0, print_ev=1000, 
-                 save_ev=100, use_gpi=True, test_epsilon=0.03, **kwargs):
+                 save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -435,6 +442,7 @@ class SFDQN:
 
         # Sequential Successor Features
         self.buffers = []
+        self.device = device
 
     def set_active_training_task(self, index):
         """
@@ -454,7 +462,6 @@ class SFDQN:
         self.steps_since_last_episode, self.reward_since_last_episode = 0, 0.
         self.steps, self.reward = 0, 0.
         self.epsilon = self.epsilon_init
-        self.episode_reward_hist = []
         
         # Sequential
         self.buffer = self.buffers[index]
@@ -476,12 +483,13 @@ class SFDQN:
         
             if isinstance(losses, tuple):
                 total_loss, psi_loss, phi_loss = losses
-                self.logger.log_losses(total_loss.item(), psi_loss.item(), phi_loss.item(), [1], self.total_training_steps)
+                self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+                self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+                self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
 
-        # Print weights for Reward Mapper
-        if self.total_training_steps % 1000 == 0:
+            # Print weights for Reward Mapper
             task_w = self.sf.fit_w[self.task_index]
-            print(f'Current task {self.task_index} Reward Mapper {task_w.weight}')
+            self.logger.log({f'train/source_task_{self.task_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
 
     def reset(self):
         """
@@ -491,9 +499,6 @@ class SFDQN:
         self.phis = []
         
         # reset counter history
-        self.cum_reward = 0.
-        self.reward_hist = []
-        self.cum_reward_hist = []
         self.sf.reset()
 
         for buffer in self.buffers:
@@ -516,36 +521,6 @@ class SFDQN:
         self.sf.add_training_task(task, source=None)
         # Append Buffer
         self.buffers.append(self.buffer_handle())
-    
-    def get_progress_dict(self):
-        if self.sf is not None:
-            gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-            w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
-        else:
-            gpi_percent = None
-            w_error = None
-
-        return_dict = {
-            'task': self.task_index,
-            'steps': self.total_training_steps,
-            'episodes': self.episode,
-            'eps': self.epsilon,
-            'ep_reward': self.episode_reward,
-            'reward': self.reward,
-            'reward_hist': self.reward_hist,
-            'cum_reward': self.cum_reward,
-            'cum_reward_hist': self.cum_reward_hist,
-            'GPI%': gpi_percent,
-            'w_err': w_error
-            }
-        return return_dict
-    
-    def get_progress_strings(self):
-        sample_str, reward_str = super(SFDQN, self).get_progress_strings()
-        gpi_percent = self.sf.GPI_usage_percent(self.task_index)
-        w_error = torch.linalg.norm(self.sf.fit_w[self.task_index].weight.T - self.sf.true_w[self.task_index])
-        gpi_str = 'GPI% \t {:.4f} \t w_err \t {:.4f}'.format(gpi_percent, w_error)
-        return sample_str, reward_str, gpi_str
 
     def next_sample(self, viewer=None, n_view_ev=None):
         """
@@ -570,15 +545,16 @@ class SFDQN:
             self.episode += 1
             self.steps_since_last_episode = 0
             self.episode_reward = self.reward_since_last_episode
-            self.reward_since_last_episode = 0.   
-            if self.episode > 1:
-                self.episode_reward_hist.append(self.episode_reward)  
+            self.reward_since_last_episode = 0.
+
+            # Log when new episode
+            self.logger.log({f'train/source_task{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
         
         # compute the Q-values in the current state
         # Epsilon greedy exploration/exploitation
         # sample from a Bernoulli distribution with parameter epsilon
         if random.random() <= self.epsilon:
-            a = torch.tensor(random.randrange(self.n_actions)).to(device)
+            a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
         else:
         
             with torch.no_grad():
@@ -613,14 +589,9 @@ class SFDQN:
         self.reward += r
         self.steps_since_last_episode += 1
         self.reward_since_last_episode += r
-        self.cum_reward += r
         
         if self.steps_since_last_episode >= self.T:
             self.new_episode = True
-            
-        if self.steps % self.save_ev == 0:
-            self.reward_hist.append(self.reward)
-            self.cum_reward_hist.append(self.cum_reward)
         
         # viewing
         if viewer is not None and self.episode % n_view_ev == 0:
@@ -636,8 +607,8 @@ class SFDQN:
             self.add_training_task(train_task)
 
         for test_task in test_tasks:
-            fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(device)
-            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=device)
+            fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
+            w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=device)
 
             with torch.no_grad():
@@ -665,13 +636,20 @@ class SFDQN:
                     if t % n_test_ev == 0:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
-                            R = self.test_agent(test_task, test_index)
-                            Rs.append(R)
-                        avg_R = torch.mean(torch.Tensor(Rs).to(device))
+                            R, accum_loss = self.test_agent(test_task, test_index)
+                            Rs.append(R.detach().cpu().numpy())
+
+                            self.logger.log({f'eval/target_task_{test_index}/total_reward': R.detach().cpu().numpy().item(), 'timesteps': self.total_training_steps})
+                            self.logger.log({f'losses/target_task_{test_index}/total_loss': accum_loss, 'timesteps': self.total_training_steps})
+
+                        avg_R = np.mean(Rs)
                         return_data.append(avg_R)
-                        self.logger.log_progress(self.get_progress_dict())
-                        self.logger.log_average_reward(avg_R, self.total_training_steps)
-                        self.logger.log_accumulative_reward(torch.sum(torch.Tensor(return_data).to(device)), self.total_training_steps)
+
+                        # log average return
+                        self.logger.log({f'eval/average_reward': avg_R, 'timesteps': self.total_training_steps})
+
+                        # Every n_test_ev we can log the current progress in source task.
+                        self.logger.log({f'train/source_task_{self.task_index}/total_reward': self.reward.clone().detach().cpu().numpy().item(), 'timesteps': self.total_training_steps})
 
                     self.total_training_steps += 1
         return return_data
@@ -681,7 +659,7 @@ class SFDQN:
     def get_test_action(self, s_enc, w):
         with torch.no_grad():
             if random.random() <= self.test_epsilon:
-                a = torch.tensor(random.randrange(self.n_actions)).to(device)
+                a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
             else:
                 psi = self.sf.get_successors(s_enc)
                 q = w(psi)[:,:,:,0]
@@ -715,10 +693,7 @@ class SFDQN:
             if done:
                 break
 
-        # Log accum loss for T
-        self.logger.log_target_error_progress(self.get_target_reward_mapper_error(R, accum_loss, test_index, self.T))
-
-        return R
+        return R, accum_loss
 
     def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
         # Return Loss
@@ -726,7 +701,7 @@ class SFDQN:
         loss_task = torch.nn.MSELoss()
 
         with torch.no_grad():
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(device)
+            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         optim.zero_grad()
 
@@ -736,14 +711,3 @@ class SFDQN:
         
         optim.step()
         return loss
-
-    def get_target_reward_mapper_error(self, r, loss, task_index, ts):
-        return_dict = {
-            'task': task_index,
-            # Total steps and ev_frequency
-            'reward': r,
-            'steps': ((500 * (self.total_training_steps // 1000)) + ts),
-            'w_error': loss,
-            #'w_error': torch.linalg.norm(self.test_tasks_weights[task_index] - task.get_w())
-            }
-        return return_dict
