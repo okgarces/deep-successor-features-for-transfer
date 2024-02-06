@@ -1015,8 +1015,9 @@ class TSFDQN:
             successor_features = self.sf.get_successors(s)
             next_successor_features = self.sf.get_next_successors(s1)
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+            next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
 
-        next_tsf = transformed_phi + self.gamma * torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
+        next_tsf = transformed_phi + self.gamma * next_target_tsf
 
         tsf = torch.sum(successor_features * normalized_omegas, axis=1)[:, a ,:]
         loss_task = torch.nn.MSELoss()
