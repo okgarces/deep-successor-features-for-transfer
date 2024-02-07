@@ -33,7 +33,7 @@ class Reacher(Task):
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = torch.tensor(self.env.reset()).detach().requires_grad_(False).to(self.device)
+        state = self.env.reset().detach().requires_grad_(False).to(self.device)
         if self.include_target_in_state:
             return torch.concat([state.flatten(), self.target_pos]).to(self.device)
         else:
@@ -47,8 +47,8 @@ class Reacher(Task):
         real_action = self.action_dict[action_int]
         new_state, reward, done, _ = self.env.step(real_action)
 
-        new_state = torch.tensor(new_state).detach().requires_grad_(False).to(self.device)
-        reward = torch.tensor(reward).detach().requires_grad_(False).to(self.device)
+        new_state = new_state.detach().requires_grad_(False).to(self.device)
+        reward = reward.detach().requires_grad_(False).to(self.device)
         
         if self.include_target_in_state:
             return_state = torch.concat([new_state, self.target_pos])
@@ -61,7 +61,10 @@ class Reacher(Task):
     # STATE ENCODING FOR DEEP LEARNING
     # ===========================================================================
     def encode(self, state):
-        return torch.tensor(state).detach().requires_grad_(False).reshape((1, -1)).to(self.device)
+        if not isinstance(state, torch.Tensor):
+            state = torch.tensor(state)
+
+        return state.detach().requires_grad_(False).reshape((1, -1)).to(self.device)
     
     def encode_dim(self):
         if self.include_target_in_state:
@@ -104,8 +107,7 @@ class ReacherBulletEnv(BaseBulletEnv):
 
         state = self.robot.calc_state()  # sets self.to_target_vec
         
-        delta = torch.linalg.norm(
-            torch.Tensor(self.robot.fingertip.pose().xyz()) - np.array(self.robot.target.pose().xyz()))
+        delta = torch.linalg.norm(torch.tensor(self.robot.fingertip.pose().xyz()) - np.array(self.robot.target.pose().xyz()))
         reward = 1. - 4. * delta
         self.HUD(state, a, False)
         
@@ -147,7 +149,7 @@ class ReacherRobot(MJCFBasedRobot):
         # target_x, _ = self.jdict["target_x"].current_position()
         # target_y, _ = self.jdict["target_y"].current_position()
         self.to_target_vec = np.array(self.fingertip.pose().xyz()) - np.array(self.target.pose().xyz())
-        return torch.Tensor([
+        return torch.tensor([
             theta,
             self.theta_dot,
             self.gamma,

@@ -480,16 +480,16 @@ class SFDQN:
             # This is to update SFs with the current transitions
             # for index in range(self.n_tasks):
             #     losses = self.sf.update_successor(transitions, index, self.use_gpi)
-        
-            if isinstance(losses, tuple):
-                total_loss, psi_loss, phi_loss = losses
-                self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
-                self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
-                self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+            if self.total_training_steps % 1000 == 0:
+                if isinstance(losses, tuple):
+                    total_loss, psi_loss, phi_loss = losses
+                    self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.item(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.item(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.item(), 'timesteps': self.total_training_steps})
 
-            # Print weights for Reward Mapper
-            task_w = self.sf.fit_w[self.task_index]
-            self.logger.log({f'train/source_task_{self.task_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+                # Print weights for Reward Mapper
+                task_w = self.sf.fit_w[self.task_index]
+                self.logger.log({f'train/source_task_{self.task_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
 
     def reset(self):
         """
@@ -548,7 +548,7 @@ class SFDQN:
             self.reward_since_last_episode = 0.
 
             # Log when new episode
-            self.logger.log({f'train/source_task{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
+            self.logger.log({f'train/source_task_{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
         
         # compute the Q-values in the current state
         # Epsilon greedy exploration/exploitation
@@ -588,7 +588,7 @@ class SFDQN:
         self.steps += 1
         self.reward += r
         self.steps_since_last_episode += 1
-        self.reward_since_last_episode += r
+        self.reward_since_last_episode += r.detach().cpu().numpy()
         
         if self.steps_since_last_episode >= self.T:
             self.new_episode = True

@@ -549,7 +549,7 @@ class TSFDQN:
             self.reward_since_last_episode = 0.
 
             # Log when new episode
-            self.logger.log({f'train/source_task{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
+            self.logger.log({f'train/source_task_{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
 
         # compute the Q-values in the current state
         q = self.get_Q_values(self.s, self.s_enc)
@@ -646,9 +646,9 @@ class TSFDQN:
             if self.total_training_steps % 1000 == 0:
                 if isinstance(losses, tuple):
                     total_loss, psi_loss, phi_loss = losses
-                    self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
-                    self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
-                    self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.clone().detach().cpu().numpy(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.item(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.item(), 'timesteps': self.total_training_steps})
+                    self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.item(), 'timesteps': self.total_training_steps})
 
                 task_w = self.sf.fit_w[self.task_index]
                 self.logger.log({f'train/source_task_{self.task_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
@@ -822,7 +822,7 @@ class TSFDQN:
         omegas_temp = self._init_omega(len(train_tasks))
         with torch.no_grad():
             omegas_temp = (omegas_temp / torch.sum(omegas_temp, axis=1, keepdim=True))
-        omegas_temp = torch.tensor(omegas_temp).requires_grad_(True)
+        omegas_temp = omegas_temp.requires_grad_(True)
 
         # Initialize Target Reward Mappers and optimizer
         for test_task in test_tasks:
@@ -989,7 +989,8 @@ class TSFDQN:
         t_states = []
         t_next_states = []
 
-        normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+        sum_omegas_normalize = torch.sum(omegas, axis=1, keepdim=True).detach()
+        normalized_omegas = (omegas / sum_omegas_normalize)
 
         with torch.no_grad():
             for g in self.g_functions:
@@ -1010,7 +1011,7 @@ class TSFDQN:
         with torch.no_grad():
             successor_features = self.sf.get_successors(s)
             next_successor_features = self.sf.get_next_successors(s1)
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+            r_tensor = r.float().unsqueeze(0).to(self.device)
             next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
 
         next_tsf = transformed_phi + self.gamma * next_target_tsf
@@ -1018,7 +1019,7 @@ class TSFDQN:
         tsf = torch.sum(successor_features * normalized_omegas, axis=1)[:, a ,:]
         loss_task = torch.nn.MSELoss()
 
-        r_fit = w_approx(transformed_phi)
+        r_fit = w_approx(transformed_phi).reshape(-1)
 
         # Hyperparameters and L1 Regularizations
         beta_loss_coefficient = torch.tensor(self.hyperparameters['beta_loss_coefficient'])
@@ -1038,7 +1039,8 @@ class TSFDQN:
         # Sum_i omega_i = 1
         with torch.no_grad():
             epsilon = 1e-7
-            omegas.clamp_(epsilon) 
+            omegas.clamp_(epsilon)
+            omegas.data = (omegas / torch.sum(omegas, axis=1, keepdim=True)).data
 
         # Possible we can log the phi values, the transformed states.
 
