@@ -304,7 +304,7 @@ class DeepSF:
     def update_successor(self, transitions, policy_index, use_gpi=True, to_propagate=True):
         if transitions is None:
             return
-        use_gpi = True
+
         states, actions, rs, phis, next_states, gammas = transitions
         n_batch = len(gammas)
         indices = torch.arange(n_batch)
