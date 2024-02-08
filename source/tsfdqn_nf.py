@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from utils.torch import update_models_weights
+from utils.torch import update_models_weights, get_parameters_norm
 from utils.logger import get_logger_level
 import random
 
@@ -411,15 +411,14 @@ class Planar(nn.Module):
         return z_
 
     @classmethod
-    def build_planar_flow(cls, input_dim, output_dim, n_affine_flows):
-        raise Exception('This is being modified. It is not implemented yet.')
-        # TODO to implement later
-        flows = [cls(input_dim).to(device) for _ in range(n_affine_flows)]
-        # Last input 
-        last_layer = torch.nn.Linear(input_dim, output_dim, bias=True, device=device)
-        flows.append(last_layer)
+    def build_planar_flow(cls, input_dim, output_dim, include_linear_layer=False, n_affine_flows = 1):
+        flows = [cls(input_dim) for _ in range(n_affine_flows)]
+        # Last linear layer
+        if include_linear_layer:
+            last_layer = torch.nn.Linear(input_dim, output_dim, bias=True)
+            flows.append(last_layer)
 
-        return torch.nn.Sequential(*flows).to(device)
+        return torch.nn.Sequential(*flows)
 
 ################################## Agent ####################################################
 class TSFDQN:
@@ -616,10 +615,14 @@ class TSFDQN:
             self.c = c
             return q[:, c,:]
 
-    def _init_g_function(self, states_dim, output_dim, n_coupling_layers):
+    def _init_g_function(self, states_dim, output_dim, n_coupling_layers = 0):
         # Number of planarflows = 10
-        g_function = Planar(states_dim).to(self.device)
-        return g_function
+        if n_coupling_layers > 0:
+            g_function = Planar.build_planar_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)
+        else:
+            g_function = Planar(states_dim)
+
+        return g_function.to(self.device)
 
     def _init_h_function(self, input_dim, features_dim):
         # TODO Remove weights clamp and initial weights
@@ -712,57 +715,28 @@ class TSFDQN:
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
-        # if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev - 1:
-        #     print(f'########### BEGIN #################')
-        #     print(f'Affine transformed states {torch.norm(affine_transformed_states, dim=0)} task {policy_index}')
-        #     print(f'g functions values states {torch.norm(transformed_state, dim=0)} task {policy_index}')
-        #     print(f'g functions values next states {torch.norm(transformed_next_state, dim=0)} task {policy_index}')
-        #     print(f'phis values {torch.norm(phis, dim=0)} task {policy_index}')
-        #     print(f'Policy Index {policy_index}')
-        #     print(f' Update STEP # {self.sf.updates_since_target_updated[policy_index]}')
-        #
-        #     accum_grads = 0
-        #     accum_weights = 0
-        #     for params in psi_model.parameters():
-        #         accum_grads += torch.norm(params.grad)
-        #         accum_weights += torch.norm(params.data)
-        #     print(f'Gradients of Psi {accum_grads}')
-        #     print(f'Psi weights {accum_weights}')
-        #
-        #     accum_grads = 0
-        #     accum_weights = 0
-        #     for params in g_function.parameters():
-        #         accum_grads += torch.norm(params.grad)
-        #         accum_weights += torch.norm(params.data)
-        #     print(f'Gradients of G function {accum_grads}')
-        #     print(f'G function weights {accum_weights}')
-        #
-        #     accum_grads = 0
-        #     accum_weights = 0
-        #     for params in self.h_function.parameters():
-        #         accum_grads += torch.norm(params.grad)
-        #         accum_weights += torch.norm(params.data)
-        #     print(f'Gradients of H function {accum_grads}')
-        #     print(f'H function weights {accum_weights}')
-        #
-        #     accum_grads = 0
-        #     accum_weights = 0
-        #     for params in task_w.parameters():
-        #         accum_grads += torch.norm(params.grad)
-        #         accum_weights += torch.norm(params.data)
-        #         print(f'W weights {params.data}')
-        #     print(f'Gradients of W {accum_grads}')
-        #     print(f'W weights {accum_weights}')
-        #
-        #     accum_grads = 0
-        #     accum_weights = 0
-        #     for params in target_psi_model.parameters():
-        #         if params.grad is not None:
-        #             accum_grads += torch.norm(params.grad)
-        #         accum_weights += torch.norm(params.data)
-        #     print(f'Gradients of Psi Target {accum_grads}')
-        #     print(f'Weights of Psi Target {accum_weights}')
-        #     print(f'########### END #################')
+        if self.total_training_steps % 1_000 == 0:
+            self.logger.log({f'metrics/source_task_{policy_index}/affine_t_states': str(torch.norm(affine_transformed_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_t_states': str(torch.norm(transformed_state, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_t_next_states': str(torch.norm(transformed_next_state, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/phis_values': str(torch.norm(phis, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+
+            # Log gradients
+            accum_grads, accum_weights = get_parameters_norm(psi_model)
+            self.logger.log({f'metrics/source_task_{policy_index}/psi_model_gradients_norm':  accum_grads, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/psi_model_weights_norm': accum_weights, 'timesteps': self.total_training_steps})
+
+            accum_grads, accum_weights = get_parameters_norm(g_function)
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_gradients_norm': accum_grads, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
+
+            accum_grads, accum_weights = get_parameters_norm(self.h_function)
+            self.logger.log({f'metrics/source_task_{policy_index}/h_function_gradients_norm': accum_grads, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/h_function_weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
+
+            accum_grads, accum_weights = get_parameters_norm(task_w)
+            self.logger.log({f'metrics/source_task_{policy_index}/weights_gradients_norm':  accum_grads, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
 
         optim.step()
 
@@ -795,7 +769,7 @@ class TSFDQN:
         # Transformed Successor Feature
         # Encode Dim encapsulates the state encoding dimension
         g_h_function_dims = self.hyperparameters.get('g_h_function_dims')
-        n_coupling_layers = self.hyperparameters.get('n_coupling_layers', 1)
+        n_coupling_layers = self.hyperparameters.get('n_coupling_layers', 0)
 
         g_function = self._init_g_function(task.encode_dim(), g_h_function_dims, n_coupling_layers)
         self.g_functions.append(g_function)

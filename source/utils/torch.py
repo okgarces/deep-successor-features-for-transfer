@@ -32,6 +32,16 @@ def update_models_weights(model: torch.nn.Module, target_model: torch.nn.Module)
     for target_param, model_param in zip(target_model.parameters(), model.parameters()):
         target_param.data.copy_(model_param.data)
 
+def get_parameters_norm(model: torch.nn.Module):
+    with torch.no_grad():
+        # Log gradients
+        accum_grads = 0
+        accum_weights = 0
+        for params in model.parameters():
+            accum_grads += torch.norm(params.grad)
+            accum_weights += torch.norm(params.data)
+
+    return torch.norm(accum_grads).item(), torch.norm(accum_weights).item()
 
 def set_random_seed(seed = 1024) -> None:
     np.random.seed(seed)
