@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from abc import abstractmethod
 import time
