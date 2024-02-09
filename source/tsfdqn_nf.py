@@ -466,11 +466,12 @@ class TSFDQN:
             # Log when new episode
             self.logger.log({f'train/source_task_{self.task_index}/episode_reward': self.episode_reward, 'episodes': self.episode})
 
-        # compute the Q-values in the current state
-        q = self.get_Q_values(self.s, self.s_enc)
-        
-        # choose an action using the epsilon-greedy policy
-        a = self._epsilon_greedy(q)
+        with torch.no_grad():
+            # compute the Q-values in the current state
+            q = self.get_Q_values(self.s, self.s_enc)
+
+            # choose an action using the epsilon-greedy policy
+            a = self._epsilon_greedy(q)
         
         # take action a and observe reward r and next state s'
         s1, r, terminal = self.active_task.transition(a)
