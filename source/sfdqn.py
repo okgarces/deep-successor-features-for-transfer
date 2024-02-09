@@ -2,91 +2,11 @@
 import numpy as np
 import torch
 
+from source.tasks.task import Task
 from utils.torch import update_models_weights
 from utils.logger import get_logger_level
 import random
 
-
-class ReplayBuffer:
-    
-    def __init__(self, n_samples=1000000, n_batch=32, device=None):
-        """
-        Creates a new randomized replay buffer.
-        
-        Parameters
-        ----------
-        n_samples : integer
-            the maximum number of samples that can be stored in the buffer
-        n_batch : integer
-            the batch size
-        """
-        self.n_samples = n_samples
-        self.n_batch = n_batch
-        self.device = device
-
-        # When initialize run reset()
-        self.reset()
-    
-    def reset(self):
-        """
-        Removes all samples currently stored in the buffer.
-        """
-        self.buffer = np.empty(self.n_samples, dtype=object)
-        self.index = 0
-        self.size = 0
-    
-    def replay(self):
-        """
-        Samples a batch of samples from the buffer randomly. If the number of samples
-        currently in the buffer is less than the batch size, returns None.
-        
-        Returns
-        -------
-        states : torch.Tensor
-            a collection of starting states of shape [n_batch, -1]
-        actions : torch.Tensor
-            a collection of actions taken in the starting states of shape [n_batch,]
-        rewards : torch.Tensor:
-            a collection of rewards (for DQN) or features (for SFDQN) obtained of shape [n_batch, -1]
-        next_states : torch.Tensor
-            a collection of successor states of shape [n_batch, -1]
-        gammas : torch.Tensor
-            a collection of discount factors to be applied in computing targets for training of shape [n_batch,]
-        """
-        if self.size < self.n_batch: return None
-        indices = np.random.randint(low=0, high=self.size, size=(self.n_batch,))
-        states, actions, rewards, phis, next_states, gammas = zip(*self.buffer[indices])
-        states = torch.vstack(states).to(self.device)
-        actions = torch.tensor(actions).to(self.device)
-        rewards = torch.vstack(rewards).to(self.device)
-        phis = torch.vstack(phis).to(self.device)
-        next_states = torch.vstack(next_states).to(self.device)
-        gammas = torch.tensor(gammas).to(self.device)
-        return states, actions, rewards, phis, next_states, gammas
-    
-    def append(self, state: torch.Tensor, action: torch.Tensor, reward: torch.Tensor, phi: torch.Tensor, next_state: torch.Tensor, gamma: torch.Tensor) -> None:
-        """
-        Adds the specified sample to the replay buffer. If the buffer is full, then the earliest added
-        sample is removed, and the new sample is added.
-        
-        Parameters
-        ----------
-        state : torch.Tensor
-            the encoded state of the task
-        action : integer
-            the action taken in state
-        reward : torch.Tensor
-            the reward obtained in the current transition (for DQN) or state features (for SFDQN)
-        next_state : torch.Tensor
-            the encoded successor state
-        gamma : float
-            the effective discount factor to be applied in computing targets for training
-        """
-        # Reward are double. Here we convert to float to store float in Buffer
-        self.buffer[self.index] = (state, action, reward.float(), phi, next_state, gamma)
-        self.size = min(self.size + 1, self.n_samples)
-        self.index = (self.index + 1) % self.n_samples
-        
 
 ############################################ Successor Features ###################################################
 
@@ -555,11 +475,12 @@ class SFDQN:
         # Epsilon greedy exploration/exploitation
         # sample from a Bernoulli distribution with parameter epsilon
         if random.random() <= self.epsilon:
-            a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
+            a = random.randrange(self.n_actions)
         else:
         
             with torch.no_grad():
-                q, c = self.sf.GPI(self.s_enc, self.task_index, update_counters=self.use_gpi)
+                s_enc_torch = torch.tensor(self.s_enc).float().to(self.device)
+                q, c = self.sf.GPI(s_enc_torch, self.task_index, update_counters=self.use_gpi)
                 if not self.use_gpi:
                     c = self.task_index
                 self.c = c
@@ -568,7 +489,7 @@ class SFDQN:
                 # Assert number of actions and q values
                 assert q.size()[0] == self.n_actions
 
-            a = torch.argmax(q)
+                a = torch.argmax(q).item()
         # decrease the exploration gradually
         self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
         
@@ -589,7 +510,7 @@ class SFDQN:
         self.steps += 1
         self.reward += r
         self.steps_since_last_episode += 1
-        self.reward_since_last_episode += r.detach().cpu().numpy()
+        self.reward_since_last_episode += r
         
         if self.steps_since_last_episode >= self.T:
             self.new_episode = True
@@ -638,9 +559,9 @@ class SFDQN:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
                             R, accum_loss = self.test_agent(test_task, test_index)
-                            Rs.append(R.detach().cpu().numpy())
+                            Rs.append(R)
 
-                            self.logger.log({f'eval/target_task_{test_index}/total_reward': R.detach().cpu().numpy().item(), 'timesteps': self.total_training_steps})
+                            self.logger.log({f'eval/target_task_{test_index}/total_reward': R, 'timesteps': self.total_training_steps})
                             self.logger.log({f'losses/target_task_{test_index}/total_loss': accum_loss, 'timesteps': self.total_training_steps})
 
                         avg_R = np.mean(Rs)
@@ -650,17 +571,17 @@ class SFDQN:
                         self.logger.log({f'eval/average_reward': avg_R, 'timesteps': self.total_training_steps})
 
                         # Every n_test_ev we can log the current progress in source task.
-                        self.logger.log({f'train/source_task_{self.task_index}/total_reward': self.reward.clone().detach().cpu().numpy().item(), 'timesteps': self.total_training_steps})
+                        self.logger.log({f'train/source_task_{self.task_index}/total_reward': self.reward, 'timesteps': self.total_training_steps})
 
                     self.total_training_steps += 1
         return return_data
 
     ############# Target Tasks ################
     
-    def get_test_action(self, s_enc, w):
+    def get_test_action(self, s_enc: torch.Tensor, w: torch.nn.Module) -> int:
         with torch.no_grad():
             if random.random() <= self.test_epsilon:
-                a = torch.tensor(random.randrange(self.n_actions)).to(self.device)
+                a = random.randrange(self.n_actions)
             else:
                 psi = self.sf.get_successors(s_enc)
                 q = w(psi)[:,:,:,0]
@@ -668,7 +589,7 @@ class SFDQN:
                 c = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
 
                 q = q[:, c,:]
-                a = torch.argmax(q)
+                a = torch.argmax(q).item()
             return a
             
     def test_agent(self, task, test_index):
@@ -679,7 +600,8 @@ class SFDQN:
 
         accum_loss = 0
         for _ in range(self.T):
-            a = self.get_test_action(s_enc, w)
+            s_enc_torch = torch.tensor(s_enc).float().to(self.device)
+            a = self.get_test_action(s_enc_torch, w)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
@@ -696,9 +618,10 @@ class SFDQN:
 
         return R, accum_loss
 
-    def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
+    def update_test_reward_mapper(self, w_approx: torch.nn.Module, optim: torch.optim.Optimizer, task: Task, r: float, s: np.ndarray, a: int, s1: np.ndarray):
         # Return Loss
         phi = task.features(s,a,s1)
+        phi_tensor = torch.tensor(phi).float().to(self.device).detach()
         loss_task = torch.nn.MSELoss()
 
         with torch.no_grad():
@@ -706,7 +629,7 @@ class SFDQN:
 
         optim.zero_grad()
 
-        r_fit = w_approx(phi)
+        r_fit = w_approx(phi_tensor)
         loss = loss_task(r_fit, r_tensor)
         loss.backward()
         

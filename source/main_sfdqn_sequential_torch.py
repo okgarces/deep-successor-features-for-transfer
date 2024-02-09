@@ -2,12 +2,13 @@
 import argparse
 
 
-from sfdqn import SFDQN, ReplayBuffer, DeepSF
+from sfdqn import SFDQN, DeepSF
 from tasks.reacher import Reacher
 from utils.config import parse_config_file
 from utils.torch import set_torch_device, get_activation, set_random_seed
 from utils.logger import set_logger_level
 from utils.types import ModelTuple
+from utils.buffer import ReplayBuffer
 
 import torch
 from collections import OrderedDict

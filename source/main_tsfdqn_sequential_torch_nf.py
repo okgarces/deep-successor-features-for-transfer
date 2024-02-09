@@ -3,8 +3,9 @@ from utils.config import parse_config_file
 from utils.torch import set_torch_device, get_activation, set_random_seed
 from utils.logger import set_logger_level
 from utils.types import ModelTuple
+from utils.buffer import ReplayBuffer
 
-from tsfdqn_nf import TSFDQN, ReplayBuffer, DeepTSF
+from tsfdqn_nf import TSFDQN, DeepTSF
 from tasks.reacher import Reacher
 
 import torch
@@ -75,7 +76,7 @@ def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshap
     return model, loss, None
 
 def replay_buffer_handle():
-    return ReplayBuffer(sfdqn_params['buffer_params'], device=device)
+    return ReplayBuffer(**sfdqn_params['buffer_params'], device=device)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TSFDQN Reacher environment.')
