@@ -311,7 +311,7 @@ class DeepSF:
         gammas = gammas.reshape((-1, 1))
         task_w = self.fit_w[policy_index]
 
-        current_policy_index_for_gpi = policy_index
+        current_policy_index_for_gpi = [policy_index]
 
         # next actions come from current Successor Feature
         if use_gpi:
@@ -372,6 +372,7 @@ class DeepSF:
             update_models_weights(psi_model, target_psi_model)
             self.updates_since_target_updated[policy_index] = 0
 
+        # It is not easy to read but current_policy_index_for_gpi only changes if only if we are using GPI
         if to_propagate and current_policy_index_for_gpi[-1] != policy_index:
             self.update_successor(transitions, current_policy_index_for_gpi[-1], use_gpi, to_propagate=False)
 
