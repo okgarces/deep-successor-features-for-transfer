@@ -53,7 +53,7 @@ class ReplayBuffer:
         indices = np.random.randint(low=0, high=self.size, size=(self.n_batch,))
         states, actions, rewards, phis, next_states, gammas = zip(*self.buffer[indices])
         states = torch.tensor(np.vstack(states)).float().to(self.device)
-        actions = torch.tensor(np.vstack(actions)).long().to(self.device)
+        actions = torch.tensor(np.vstack(actions)).long().reshape(-1).to(self.device)
         rewards = torch.tensor(np.vstack(rewards)).float().to(self.device)
         phis = torch.tensor(np.vstack(phis)).float().to(self.device)
         next_states = torch.tensor(np.vstack(next_states)).float().to(self.device)
