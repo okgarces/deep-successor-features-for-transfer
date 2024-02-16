@@ -84,6 +84,7 @@ if __name__ == '__main__':
     parser.add_argument('-experiment_name', type=str, default=None)
     parser.add_argument('-learn_omegas', type=bool, default=True)
     parser.add_argument('-use_gpi_eval', type=bool, default=False)
+    parser.add_argument('-linear', type=bool, default=False)
 
     args = parser.parse_args()
 
@@ -95,7 +96,7 @@ if __name__ == '__main__':
     # build SFDQN    
     print('building TSFDQN With NF Sequential')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
-    sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device,
+    sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, use_linear_model=args.linear,
                   **sfdqn_params, **agent_params)
 
     # train SFDQN

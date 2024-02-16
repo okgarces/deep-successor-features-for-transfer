@@ -340,7 +340,7 @@ class Planar(nn.Module):
 class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
-                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, **kwargs):
+                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, use_linear_model=False, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -402,6 +402,7 @@ class TSFDQN:
         self.omegas = []
         self.g_functions = []
         self.h_function = None
+        self.use_linear_model = use_linear_model
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -534,11 +535,15 @@ class TSFDQN:
             return q[:, c,:]
 
     def _init_g_function(self, states_dim, output_dim, n_coupling_layers = 0):
-        # Number of planarflows = 10
-        if n_coupling_layers > 0:
-            g_function = Planar.build_planar_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)
+
+        if self.use_linear_model:
+            g_function = torch.nn.Linear(states_dim, output_dim, bias=True, device=self.device)
         else:
-            g_function = Planar(states_dim)
+            # Number of planarflows = 10
+            if n_coupling_layers > 0:
+                g_function = Planar.build_planar_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)
+            else:
+                g_function = Planar(states_dim)
 
         return g_function.to(self.device)
 
