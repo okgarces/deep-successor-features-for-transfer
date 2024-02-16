@@ -7,6 +7,7 @@ from utils.buffer import ReplayBuffer
 
 from tsfdqn_nf import TSFDQN, DeepTSF
 from tasks.reacher import Reacher
+from tasks.reacher_dissimilar import ReacherDissimilar
 
 import torch
 from collections import OrderedDict
@@ -25,6 +26,13 @@ task_params = config_params['TASK']
 goals = task_params['train_targets']
 test_goals = task_params['test_targets']
 all_goals = goals + test_goals
+
+train_torque_multipliers = task_params['train_torque_multipliers']
+test_torque_multipliers = task_params['test_torque_multipliers']
+train_filename_mjcf = task_params['train_filename_mjcf']
+test_filename_mjcf = task_params['test_filename_mjcf']
+all_torque_multipliers = train_torque_multipliers + test_torque_multipliers
+all_filename_mjfc = train_filename_mjcf + test_filename_mjcf
     
 agent_params = config_params['AGENT']
 sfdqn_params = config_params['SFDQN']
@@ -36,9 +44,16 @@ logger = None
 # read parameters from config file
 
 # tasks
-def generate_tasks(include_target):
-    train_tasks = [Reacher(all_goals, i, include_target, device=device) for i in range(len(goals))]
-    test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device) for i in range(len(test_goals))]
+def generate_tasks(include_target, dissimilar=False):
+
+    task_build = ReacherDissimilar if dissimilar else Reacher
+    if dissimilar:
+        train_tasks = [ReacherDissimilar(all_goals, i, all_torque_multipliers, all_filename_mjfc,  include_target, device=device) for i in range(len(goals))]
+        test_tasks = [ReacherDissimilar(all_goals, i + len(goals), all_torque_multipliers, all_filename_mjfc, include_target, device=device) for i in range(len(test_goals))]
+    else:
+        train_tasks = [Reacher(all_goals, i, include_target, device=device) for i in range(len(goals))]
+        test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device) for i in range(len(test_goals))]
+
     return train_tasks, test_tasks
 
 
@@ -85,6 +100,7 @@ if __name__ == '__main__':
     parser.add_argument('-learn_omegas', type=bool, default=True)
     parser.add_argument('-use_gpi_eval', type=bool, default=False)
     parser.add_argument('-linear', type=bool, default=False)
+    parser.add_argument('-dissimilar', default=False, action='store_true')
 
     args = parser.parse_args()
 
@@ -92,7 +108,7 @@ if __name__ == '__main__':
     set_random_seed(args.seed)
     logger = set_logger_level(use_logger=use_logger, prefix=args.experiment_name)
 
-    train_tasks, test_tasks = generate_tasks(False)
+    train_tasks, test_tasks = generate_tasks(False, args.dissimilar)
     # build SFDQN    
     print('building TSFDQN With NF Sequential')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
@@ -101,7 +117,6 @@ if __name__ == '__main__':
 
     # train SFDQN
     print('training TSFDQN With NF Sequential')
-    train_tasks, test_tasks = generate_tasks(False)
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task,
                 learn_omegas=args.learn_omegas, use_gpi_eval=args.use_gpi_eval)
     print('End Training TSFDQN with NF Sequential')

@@ -6,12 +6,12 @@ import torch
 import numpy as np
 
 from tasks.task import Task
-from utils.torch import get_torch_device
 
 
 class ReacherDissimilar(Task):
-    
-    def __init__(self, target_positions, task_index, torque_multipliers, filenames_mjfc, include_target_in_state=False):
+    def __init__(self, target_positions, task_index, torque_multipliers, filenames_mjfc='reacher_dissimilar_nf.cfg', include_target_in_state=False, device=None):
+        super().__init__(device)
+
         self.target_positions = target_positions
         self.task_index = task_index
         self.target_pos = target_positions[task_index]
@@ -28,34 +28,29 @@ class ReacherDissimilar(Task):
         for a1 in actions:
             for a2 in actions:
                 self.action_dict[len(self.action_dict)] = (a1, a2)
-
-        self.device = get_torch_device()
         
     def clone(self):
-        return Reacher(self.target_positions, self.task_index, self.include_target_in_state)
+        return ReacherDissimilar(self.target_positions, self.task_index, self.include_target_in_state)
     
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = torch.tensor(self.env.reset()).detach().requires_grad_(False).to(self.device)
+        state = self.env.reset()
         if self.include_target_in_state:
-            return torch.concat([state.flatten(), self.target_pos]).to(self.device)
+            return np.concatenate([state.flatten(), self.target_pos])
         else:
             return state
     
     def action_count(self):
         return len(self.action_dict)
     
-    def transition(self, action: torch.Tensor):
+    def transition(self, action: int):
         action_int = int(action)
         real_action = self.action_dict[action_int]
         new_state, reward, done, _ = self.env.step(real_action)
-
-        new_state = torch.tensor(new_state).detach().requires_grad_(False).to(self.device)
-        reward = torch.tensor(reward).detach().requires_grad_(False).to(self.device)
         
         if self.include_target_in_state:
-            return_state = torch.concat([new_state, self.target_pos])
+            return_state = np.concatenate([new_state, self.target_pos])
         else:
             return_state = new_state
             
@@ -64,8 +59,8 @@ class ReacherDissimilar(Task):
     # ===========================================================================
     # STATE ENCODING FOR DEEP LEARNING
     # ===========================================================================
-    def encode(self, state):
-        return torch.tensor(state).detach().requires_grad_(False).reshape((1, -1)).to(self.device)
+    def encode(self, state: np.ndarray):
+        return state.reshape((1, -1))
     
     def encode_dim(self):
         if self.include_target_in_state:
@@ -77,9 +72,9 @@ class ReacherDissimilar(Task):
     # SUCCESSOR FEATURES
     # ===========================================================================
     def features(self, state, action, next_state):
-        phi = torch.zeros((len(self.target_positions),)).to(self.device)
+        phi = np.zeros((len(self.target_positions),))
         for index, target in enumerate(self.target_positions):
-            delta = torch.linalg.norm(torch.tensor(self.env.robot.fingertip.pose().xyz()[:2]).detach().requires_grad_(False).to(self.device) - torch.tensor(target).detach().requires_grad_(False).to(self.device))
+            delta = np.linalg.norm(self.env.robot.fingertip.pose().xyz()[:2] - target)
             phi[index] = 1. - 4. * delta
         return phi
     
@@ -87,7 +82,7 @@ class ReacherDissimilar(Task):
         return len(self.target_positions)
     
     def get_w(self):
-        w = torch.zeros((len(self.target_positions), 1)).to(self.device)
+        w = np.zeros((len(self.target_positions), 1))
         w[self.task_index, 0] = 1.0
         return w
 
@@ -108,8 +103,7 @@ class ReacherBulletEnv(BaseBulletEnv):
 
         state = self.robot.calc_state()  # sets self.to_target_vec
         
-        delta = torch.linalg.norm(
-            torch.Tensor(self.robot.fingertip.pose().xyz()) - np.array(self.robot.target.pose().xyz()))
+        delta = np.linalg.norm(self.robot.fingertip.pose().xyz() - np.array(self.robot.target.pose().xyz()))
         reward = 1. - 4. * delta
         self.HUD(state, a, False)
         
@@ -141,7 +135,6 @@ class ReacherRobot(MJCFBasedRobot):
         self.elbow_joint.reset_current_position(self.np_random.uniform(low=-3.14 / 2, high=3.14 / 2), 0)
 
     def apply_action(self, a):
-        # Here np is ok. To apply a tuple real action to env.
         assert (np.isfinite(a).all())
         # Initial Reacher has torque multiplier 0.05
         self.central_joint.set_motor_torque(self.torque_multiplier * float(np.clip(a[0], -1, +1)))
@@ -153,7 +146,7 @@ class ReacherRobot(MJCFBasedRobot):
         # target_x, _ = self.jdict["target_x"].current_position()
         # target_y, _ = self.jdict["target_y"].current_position()
         self.to_target_vec = np.array(self.fingertip.pose().xyz()) - np.array(self.target.pose().xyz())
-        return torch.Tensor([
+        return np.array([
             theta,
             self.theta_dot,
             self.gamma,
