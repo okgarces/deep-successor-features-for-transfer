@@ -97,9 +97,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TSFDQN Reacher environment.')
     parser.add_argument('-seed', type=int, default=26)
     parser.add_argument('-experiment_name', type=str, default=None)
-    parser.add_argument('-learn_omegas', type=bool, default=True)
-    parser.add_argument('-use_gpi_eval', type=bool, default=False)
-    parser.add_argument('-linear', type=bool, default=False)
+    parser.add_argument('-no_learn_omegas',  default=True, action='store_false')
+    parser.add_argument('-use_gpi_eval_mode', type=str, default='vanilla', choices=['vanilla', 'naive', 'affine_similarity'])
+    parser.add_argument('-linear', default=False, action='store_true')
     parser.add_argument('-dissimilar', default=False, action='store_true')
 
     args = parser.parse_args()
@@ -118,5 +118,5 @@ if __name__ == '__main__':
     # train SFDQN
     print('training TSFDQN With NF Sequential')
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task,
-                learn_omegas=args.learn_omegas, use_gpi_eval=args.use_gpi_eval)
+                learn_omegas=args.no_learn_omegas, use_gpi_eval_mode=args.use_gpi_eval_mode)
     print('End Training TSFDQN with NF Sequential')

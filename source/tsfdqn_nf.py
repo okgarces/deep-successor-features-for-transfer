@@ -703,7 +703,7 @@ class TSFDQN:
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
 
-    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval=False):
+    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval_mode='vanilla'):
         if viewers is None: 
             viewers = [None] * len(train_tasks)
             
@@ -767,7 +767,7 @@ class TSFDQN:
                     if t % n_test_ev == 0:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
-                            R, accum_loss, total_phi_loss, total_psi_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, use_gpi_eval=use_gpi_eval)
+                            R, accum_loss, total_phi_loss, total_psi_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, use_gpi_eval_mode=use_gpi_eval_mode)
                             Rs.append(R)
 
                             self.logger.log({f'eval/target_task_{test_index}/omegas': str(self.omegas[test_index].clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
@@ -789,20 +789,50 @@ class TSFDQN:
                     self.total_training_steps += 1
         return return_data
     
-    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval=False, learn_omegas=True):
+    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval_mode='vanilla', learn_omegas=True):
+        """
+        use_gpi_eval_mode ['vanilla', 'naive', 'argmax_convex', 'affine_similarity',]
+        """
         with torch.no_grad():
             if random.random() <= self.test_epsilon:
                 a = random.randrange(self.n_actions)
             else:
                 successor_features = self.sf.get_successors(s_enc)
-                if use_gpi_eval:
+                if use_gpi_eval_mode=='naive':
                     q = w(successor_features)[:, :, :, 0]
                     if learn_omegas:
                         q = omegas[:,:,:,0] * q
                     max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
                     q = q[:, max_task, :]
                     a = torch.argmax(q)
+                elif use_gpi_eval_mode=='argmax_convex':
+                    assert learn_omegas is not True, 'Learn omegas should be True'
+
+                    normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+                    q = w(successor_features)[:, :, :, 0]
+                    # a =
+                    raise Exception('Not implemented yet')
+                elif use_gpi_eval_mode=='affine_similarity':
+                    t_states = []
+                    for g in self.g_functions:
+                        state = g(s_enc)
+                        t_states.append(state)
+                    # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
+                    t_states = torch.vstack(t_states).unsqueeze(1)
+
+                    if learn_omegas:
+                        t_states = t_states * omegas.squeeze(0)
+
+                    affine_states = self.h_function(t_states)  # n_tasks, n_actions, n_features
+
+                    ones_torch = torch.ones(affine_states.shape)
+                    norm_affine = torch.norm(ones_torch - affine_states, dim=-1)
+                    similar_affine_task = torch.argmin(norm_affine, dim=0)
+                    q = w(successor_features)[:, similar_affine_task, :, :]
+                    a = torch.argmax(q).item()
+
                 else:
+                    # Vanilla
                     normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
                     tsf = torch.sum(successor_features * normalized_omegas, axis=1)
                     q = w(tsf)
@@ -811,7 +841,7 @@ class TSFDQN:
                     a = torch.argmax(q).item()
             return a
             
-    def test_agent(self, task, test_index, use_gpi_eval=True, learn_omegas=True):
+    def test_agent(self, task, test_index, use_gpi_eval_mode='vanilla', learn_omegas=True):
         R = 0.0
         w, optim, scheduler = self.test_tasks_weights[test_index]
         omegas = self.omegas[test_index]
@@ -824,14 +854,14 @@ class TSFDQN:
 
         for target_ev_step in range(self.T):
             s_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
-            a = self.get_test_action(s_enc_torch, w, omegas, use_gpi_eval)
+            a = self.get_test_action(s_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
             if learn_omegas:
                 s1_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
-                a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval)
-                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done)
+                a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, gpi_mode=use_gpi_eval_mode)
             else:
                 loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
             accum_loss += loss_t.item()
@@ -858,7 +888,7 @@ class TSFDQN:
 
     def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
         # Return Loss
-        phi = task.features(s, a, s1)
+        phi = torch.tensor(task.features(s, a, s1)).float().to(self.device)
         loss_task = torch.nn.MSELoss()
 
         with torch.no_grad():
@@ -873,7 +903,11 @@ class TSFDQN:
         optim.step()
         return loss, torch.tensor(0), torch.tensor(0)
 
-    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done):
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, gpi_mode='affine_similarity'):
+        # GPI modes
+        # GPI naive: only argmax_{a} max_{\pi}
+        # GPI affine_similarity: argmax_{a} min_{||1-h||} This h could be h(\omega_{i} g^{-i}) or simply h(g^{-i})
+        # Vanilla TSF: \sum_{i} \omega_{i}
 
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
@@ -905,16 +939,38 @@ class TSFDQN:
             t_states = torch.vstack(t_states).unsqueeze(1)
             t_next_states = torch.vstack(t_next_states).unsqueeze(1)
 
+            ####################### Process latent probability transformation
+            if gpi_mode == 'affine_similarity':
+                t_states_affine = t_states * omegas.squeeze(0)
+                t_next_states_affine = t_next_states * omegas.squeeze(0)
+
+                affine_states_temp = self.h_function(t_states_affine + t_next_states_affine)  # n_tasks, n_actions, n_features
+
+                ones_torch = torch.ones(affine_states_temp.shape)
+                norm_affine = torch.norm(ones_torch - affine_states_temp, dim=-1)
+                similar_affine_task = torch.argmin(norm_affine, dim=0)
+
+        # Code to learn omegas
         weighted_states = torch.sum(t_states * normalized_omegas, axis=1)
         weighted_next_states = torch.sum(t_next_states * normalized_omegas, axis=1)
         affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
+
+        ####################### Process latent probability transformation
+
         transformed_phi = phi_tensor * affine_states.squeeze(0)
 
         with torch.no_grad():
-            successor_features = self.sf.get_successors(s_torch)
+            successor_features = self.sf.get_successors(s_torch) # n_batch, n_tasks, n_actions, n_features
             next_successor_features = self.sf.get_next_successors(s1_torch)
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
-            next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
+
+            if gpi_mode == 'affine_similarity':
+                successor_features = successor_features[:,similar_affine_task,:,:]
+                next_successor_features = next_successor_features[0,similar_affine_task,:,:]
+                next_target_tsf = next_successor_features[:, a1, :]
+
+            elif gpi_mode == 'vanilla':
+                next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
 
         next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
 
