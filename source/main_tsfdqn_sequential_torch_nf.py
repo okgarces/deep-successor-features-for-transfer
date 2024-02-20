@@ -98,7 +98,8 @@ if __name__ == '__main__':
     parser.add_argument('-seed', type=int, default=26)
     parser.add_argument('-experiment_name', type=str, default=None)
     parser.add_argument('-no_learn_omegas',  default=True, action='store_false')
-    parser.add_argument('-use_gpi_eval_mode', type=str, default='vanilla', choices=['vanilla', 'naive', 'affine_similarity'])
+
+    parser.add_argument('-use_gpi_eval_mode', type=str, default='vanilla', choices=['vanilla', 'naive', 'affine_similarity', 'affine_similarity_minmax'])
     parser.add_argument('-linear', default=False, action='store_true')
     parser.add_argument('-dissimilar', default=False, action='store_true')
 

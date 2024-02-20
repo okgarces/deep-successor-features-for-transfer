@@ -793,7 +793,7 @@ class TSFDQN:
                     self.total_training_steps += 1
         return return_data
     
-    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval_mode='vanilla', learn_omegas=True):
+    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval_mode='vanilla', learn_omegas=True, test_index=None):
         """
         use_gpi_eval_mode ['vanilla', 'naive', 'argmax_convex', 'affine_similarity',]
         """
@@ -834,6 +834,41 @@ class TSFDQN:
                     similar_affine_task = torch.argmin(norm_affine, dim=0)
                     q = w(successor_features)[:, similar_affine_task, :, :]
                     a = torch.argmax(q).item()
+                elif use_gpi_eval_mode=='affine_similarity_minmax':
+                    t_states = []
+                    for g in self.g_functions:
+                        state = g(s_enc)
+                        t_states.append(state)
+                    # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
+                    t_states = torch.vstack(t_states).unsqueeze(1)
+
+                    if learn_omegas:
+                        t_states = t_states * omegas.squeeze(0)
+
+                    affine_states = self.h_function(t_states)  # n_tasks, n_actions, n_features
+
+                    ones_torch = torch.ones(affine_states.shape).to(self.device)
+                    norm_affine = torch.norm(ones_torch - affine_states, dim=-1)
+                    q = w(successor_features)
+                    similar_affine_tasks_order_index = torch.sort(norm_affine, dim=0)[1].reshape(-1)
+                    max_q_values_index = torch.sort(torch.max(q, dim=2).values, dim=1, descending=True)[1].reshape(-1)
+
+                    min_max_task = np.zeros(similar_affine_tasks_order_index.shape)
+                    # This min_max algorithm. Sorts the similar tasks by affine value: [2, 3, 1, 0]
+                    # Max_q values are the max values [3,0,1,2] are sorted by value.
+                    # The algorithm try to match the minimum of the affine values with the max values.
+                    for min_affine_idx in range(similar_affine_tasks_order_index.shape[0]):
+                        max_q_values_idx = torch.where(max_q_values_index == similar_affine_tasks_order_index[min_affine_idx])[0].item()
+                        min_max_task[min_affine_idx] = (min_affine_idx + 1) * (max_q_values_idx + 1)
+
+                    min_max_task = similar_affine_tasks_order_index[np.argmin(min_max_task)]
+                    q = q[:, min_max_task, :, :]
+                    a = torch.argmax(q).item()
+
+                    if self.total_training_steps % 100_000 == 0: # In one million only 500 Test steps * target tasks
+                        self.logger.log({f'eval/target_task_{test_index}/similar_affine_order': str(similar_affine_tasks_order_index.detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+                        self.logger.log({f'eval/target_task_{test_index}/max_q_values_index': str(max_q_values_index.detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+                        self.logger.log({f'eval/target_task_{test_index}/min_max_selected_task': str(min_max_task.detach().cpu().numpy()), 'timesteps': self.total_training_steps})
 
                 else:
                     # Vanilla
@@ -858,13 +893,13 @@ class TSFDQN:
 
         for target_ev_step in range(self.T):
             s_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
-            a = self.get_test_action(s_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
+            a = self.get_test_action(s_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
             if learn_omegas:
                 s1_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
-                a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
+                a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
                 loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, gpi_mode=use_gpi_eval_mode)
             else:
                 loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
@@ -944,7 +979,7 @@ class TSFDQN:
             t_next_states = torch.vstack(t_next_states).unsqueeze(1)
 
             ####################### Process latent probability transformation
-            if gpi_mode == 'affine_similarity':
+            if gpi_mode in ['affine_similarity', 'affine_similarity_minmax']:
                 t_states_affine = t_states * omegas.squeeze(0)
                 t_next_states_affine = t_next_states * omegas.squeeze(0)
 
@@ -953,6 +988,9 @@ class TSFDQN:
                 ones_torch = torch.ones(affine_states_temp.shape).to(self.device)
                 norm_affine = torch.norm(ones_torch - affine_states_temp, dim=-1)
                 similar_affine_task = torch.argmin(norm_affine, dim=0)
+
+                if gpi_mode == 'affine_similarity_minmax':
+                    similar_affine_tasks_order_index = torch.sort(norm_affine, dim=0)[1].reshape(-1)
 
         # Code to learn omegas
         weighted_states = torch.sum(t_states * normalized_omegas, axis=1)
@@ -969,8 +1007,22 @@ class TSFDQN:
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
             if gpi_mode == 'affine_similarity':
-                successor_features = successor_features[:,similar_affine_task,:,:]
                 next_successor_features = next_successor_features[0,similar_affine_task,:,:]
+                next_target_tsf = next_successor_features[:, a1, :]
+            elif gpi_mode == 'affine_similarity_minmax':
+                q = w_approx(next_successor_features)
+                max_q_values_index = torch.sort(torch.max(q, dim=2).values, dim=1, descending=True)[1].reshape(-1)
+
+                min_max_task = np.zeros(similar_affine_tasks_order_index.shape)
+                # This min_max algorithm. Sorts the similar tasks by affine value: [2, 3, 1, 0]
+                # Max_q values are the max values [3,0,1,2] are sorted by value.
+                # The algorithm try to match the minimum of the affine values with the max values.
+                for min_affine_idx in range(similar_affine_tasks_order_index.shape[0]):
+                    max_q_values_idx = torch.where(max_q_values_index == similar_affine_tasks_order_index[min_affine_idx])[0].item()
+                    min_max_task[min_affine_idx] = (min_affine_idx + 1) * (max_q_values_idx + 1)
+
+                min_max_task = similar_affine_tasks_order_index[np.argmin(min_max_task)]
+                next_successor_features = next_successor_features[:, min_max_task, :, :]
                 next_target_tsf = next_successor_features[:, a1, :]
 
             elif gpi_mode == 'vanilla':
