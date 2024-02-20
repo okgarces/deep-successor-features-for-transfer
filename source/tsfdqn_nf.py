@@ -640,9 +640,13 @@ class TSFDQN:
         # log gradients this is only a way to track gradients from time to time
         if self.total_training_steps % 1_000 == 0:
             self.logger.log({f'metrics/source_task_{policy_index}/affine_t_states': str(torch.norm(affine_transformed_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/affine_t_states_mean': str(torch.mean(affine_transformed_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/g_function_t_states': str(torch.norm(transformed_state, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/g_function_t_next_states': str(torch.norm(transformed_next_state, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_t_states_mean': str(torch.mean(transformed_state, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_t_next_states_mean': str(torch.mean(transformed_next_state, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/phis_values': str(torch.norm(phis, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/phis_values_mean': str(torch.mean(phis, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
 
             # Log gradients
             accum_grads, accum_weights = get_parameters_norm(psi_model)
