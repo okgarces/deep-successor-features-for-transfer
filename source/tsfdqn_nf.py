@@ -829,7 +829,7 @@ class TSFDQN:
 
                     affine_states = self.h_function(t_states)  # n_tasks, n_actions, n_features
 
-                    ones_torch = torch.ones(affine_states.shape)
+                    ones_torch = torch.ones(affine_states.shape).to(self.device)
                     norm_affine = torch.norm(ones_torch - affine_states, dim=-1)
                     similar_affine_task = torch.argmin(norm_affine, dim=0)
                     q = w(successor_features)[:, similar_affine_task, :, :]
@@ -950,7 +950,7 @@ class TSFDQN:
 
                 affine_states_temp = self.h_function(t_states_affine + t_next_states_affine)  # n_tasks, n_actions, n_features
 
-                ones_torch = torch.ones(affine_states_temp.shape)
+                ones_torch = torch.ones(affine_states_temp.shape).to(self.device)
                 norm_affine = torch.norm(ones_torch - affine_states_temp, dim=-1)
                 similar_affine_task = torch.argmin(norm_affine, dim=0)
 
