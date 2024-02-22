@@ -869,7 +869,30 @@ class TSFDQN:
                         self.logger.log({f'eval/target_task_{test_index}/similar_affine_order': str(similar_affine_tasks_order_index.detach().cpu().numpy()), 'timesteps': self.total_training_steps})
                         self.logger.log({f'eval/target_task_{test_index}/max_q_values_index': str(max_q_values_index.detach().cpu().numpy()), 'timesteps': self.total_training_steps})
                         self.logger.log({f'eval/target_task_{test_index}/min_max_selected_task': str(min_max_task.detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+                elif use_gpi_eval_mode == 'affine_similarity_minmax_expectation':
+                    # It is the same as minmax_affine.
+                    normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
 
+                    t_states = []
+                    for g in self.g_functions:
+                        state = g(s_enc)
+                        t_states.append(state)
+                    # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
+                    t_states = torch.vstack(t_states).unsqueeze(1)
+                    t_states = t_states * normalized_omegas
+
+                    affine_states = self.h_function(t_states)  # n_tasks, n_actions, n_features
+                    ones_torch = torch.ones(affine_states.shape).to(self.device)
+
+                    expected_transformation = affine_states
+                    next_successor_features = successor_features * (ones_torch - expected_transformation.abs())
+                    q_values = w(next_successor_features)
+                    max_task = torch.squeeze(torch.argmax(torch.max(q_values, dim=2).values, dim=1))
+                    q_values = q_values[:, max_task, :, :]
+                    a = torch.argmax(q_values).item()
+
+                    if self.total_training_steps % 100_000 == 0:  # In one million only 500 Test steps * target tasks
+                        self.logger.log({f'eval/target_task_{test_index}/minmax_expected_task': max_task.item(), 'timesteps': self.total_training_steps})
                 else:
                     # Vanilla
                     normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
@@ -978,24 +1001,10 @@ class TSFDQN:
             t_states = torch.vstack(t_states).unsqueeze(1)
             t_next_states = torch.vstack(t_next_states).unsqueeze(1)
 
-            ####################### Process latent probability transformation
-            if gpi_mode in ['affine_similarity', 'affine_similarity_minmax']:
-                t_states_affine = t_states * omegas.squeeze(0)
-                t_next_states_affine = t_next_states * omegas.squeeze(0)
-
-                affine_states_temp = self.h_function(t_states_affine + t_next_states_affine)  # n_tasks, n_actions, n_features
-
-                ones_torch = torch.ones(affine_states_temp.shape).to(self.device)
-                norm_affine = torch.norm(ones_torch - affine_states_temp, dim=-1)
-                similar_affine_task = torch.argmin(norm_affine, dim=0)
-
-                if gpi_mode == 'affine_similarity_minmax':
-                    similar_affine_tasks_order_index = torch.sort(norm_affine, dim=0)[1].reshape(-1)
-
         # Code to learn omegas
         weighted_states = torch.sum(t_states * normalized_omegas, axis=1)
         weighted_next_states = torch.sum(t_next_states * normalized_omegas, axis=1)
-        affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
+        affine_states = self.h_function(weighted_states + weighted_next_states)
 
         ####################### Process latent probability transformation
 
@@ -1006,27 +1015,7 @@ class TSFDQN:
             next_successor_features = self.sf.get_next_successors(s1_torch)
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-            if gpi_mode == 'affine_similarity':
-                next_successor_features = next_successor_features[0,similar_affine_task,:,:]
-                next_target_tsf = next_successor_features[:, a1, :]
-            elif gpi_mode == 'affine_similarity_minmax':
-                q = w_approx(next_successor_features)
-                max_q_values_index = torch.sort(torch.max(q, dim=2).values, dim=1, descending=True)[1].reshape(-1)
-
-                min_max_task = np.zeros(similar_affine_tasks_order_index.shape)
-                # This min_max algorithm. Sorts the similar tasks by affine value: [2, 3, 1, 0]
-                # Max_q values are the max values [3,0,1,2] are sorted by value.
-                # The algorithm try to match the minimum of the affine values with the max values.
-                for min_affine_idx in range(similar_affine_tasks_order_index.shape[0]):
-                    max_q_values_idx = torch.where(max_q_values_index == similar_affine_tasks_order_index[min_affine_idx])[0].item()
-                    min_max_task[min_affine_idx] = (min_affine_idx + 1) * (max_q_values_idx + 1)
-
-                min_max_task = similar_affine_tasks_order_index[np.argmin(min_max_task)]
-                next_successor_features = next_successor_features[:, min_max_task, :, :]
-                next_target_tsf = next_successor_features[:, a1, :]
-
-            elif gpi_mode == 'vanilla':
-                next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1 ,:]
+            next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1, :]
 
         next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
 
