@@ -336,11 +336,68 @@ class Planar(nn.Module):
 
         return torch.nn.Sequential(*flows)
 
+class MaskedAffineFlow(torch.nn.Module):
+    """RealNVP as introduced in [arXiv: 1605.08803](https://arxiv.org/abs/1605.08803)
+
+    Masked affine flow:
+
+    ```
+    f(z) = b * z + (1 - b) * (z * exp(s(b * z)) + t)
+    ```
+
+    - class AffineHalfFlow(Flow): is MaskedAffineFlow with alternating bit mask
+    - NICE is AffineFlow with only shifts (volume preserving)
+    """
+
+    def __init__(self, b, t=None, s=None):
+        """Constructor
+
+        Args:
+          b: mask for features, i.e. tensor of same size as latent data point filled with 0s and 1s
+          t: translation mapping, i.e. neural network, where first input dimension is batch dim, if None no translation is applied
+          s: scale mapping, i.e. neural network, where first input dimension is batch dim, if None no scale is applied
+        """
+        super().__init__()
+        self.b_cpu = b.view(1, *b.size())
+        self.register_buffer("b", self.b_cpu)
+
+        if s is None:
+            self.s = torch.zeros_like
+        else:
+            self.add_module("s", s)
+
+        if t is None:
+            self.t = torch.zeros_like
+        else:
+            self.add_module("t", t)
+
+    def forward(self, z):
+        z_masked = self.b * z
+        scale = self.s(z_masked)
+        nan = torch.tensor(np.nan, dtype=z.dtype, device=z.device)
+        scale = torch.where(torch.isfinite(scale), scale, nan)
+        trans = self.t(z_masked)
+        trans = torch.where(torch.isfinite(trans), trans, nan)
+        z_ = z_masked + (1 - self.b) * (z * torch.exp(scale) + trans)
+        # log_det = torch.sum((1 - self.b) * scale, dim=list(range(1, self.b.dim())))
+        return z_  # , log_det
+
+    def inverse(self, z):
+        z_masked = self.b * z
+        scale = self.s(z_masked)
+        nan = torch.tensor(np.nan, dtype=z.dtype, device=z.device)
+        scale = torch.where(torch.isfinite(scale), scale, nan)
+        trans = self.t(z_masked)
+        trans = torch.where(torch.isfinite(trans), trans, nan)
+        z_ = z_masked + (1 - self.b) * (z - trans) * torch.exp(-scale)
+        # log_det = -torch.sum((1 - self.b) * scale, dim=list(range(1, self.b.dim())))
+        return z_  # , log_det
+
 ################################## Agent ####################################################
 class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
-                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, use_linear_model=False, **kwargs):
+                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar', **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -402,7 +459,7 @@ class TSFDQN:
         self.omegas = []
         self.g_functions = []
         self.h_function = None
-        self.use_linear_model = use_linear_model
+        self.invertible_flow = invertible_flow # By default is planar. (MaskedAffineFlow) realnvp. linear.
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -536,9 +593,34 @@ class TSFDQN:
 
     def _init_g_function(self, states_dim, output_dim, n_coupling_layers = 0):
 
-        if self.use_linear_model:
+        if self.invertible_flow == 'linear':
             g_function = torch.nn.Linear(states_dim, output_dim, bias=True, device=self.device)
+        elif self.invertible_flow == 'realnvp':
+            b = torch.Tensor([1 if i % 2 == 0 else 0 for i in range(states_dim)])
+            s_init = torch.nn.ModuleList([
+                torch.nn.Linear(states_dim, 2 * states_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(2 * states_dim, 2 * states_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(2 * states_dim, output_dim),
+            ])
+            t_init = torch.nn.ModuleList([
+                torch.nn.Linear(states_dim, 2 * states_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(2 * states_dim, 2 * states_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(2 * states_dim, output_dim),
+            ])
+            nn.init.zeros_(s_init[-1].weight)
+            nn.init.zeros_(s_init[-1].bias)
+            nn.init.zeros_(t_init[-1].weight)
+            nn.init.zeros_(t_init[-1].bias)
+
+            s = torch.nn.Sequential(*s_init)
+            t = torch.nn.Sequential(*t_init)
+            g_function = MaskedAffineFlow(b, t, s)
         else:
+            # default is planar
             # Number of planarflows = 10
             if n_coupling_layers > 0:
                 g_function = Planar.build_planar_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)

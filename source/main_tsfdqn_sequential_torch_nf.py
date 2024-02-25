@@ -100,7 +100,7 @@ if __name__ == '__main__':
     parser.add_argument('-no_learn_omegas',  default=True, action='store_false')
 
     parser.add_argument('-use_gpi_eval_mode', type=str, default='vanilla', choices=['vanilla', 'naive', 'affine_similarity', 'affine_similarity_minmax', 'affine_similarity_minmax_expectation'])
-    parser.add_argument('-linear', default=False, action='store_true')
+    parser.add_argument('-invertible_flow', type=str, default='planar', choices=['planar', 'realnvp', 'linear'])
     parser.add_argument('-dissimilar', default=False, action='store_true')
 
     args = parser.parse_args()
@@ -113,7 +113,7 @@ if __name__ == '__main__':
     # build SFDQN    
     print('building TSFDQN With NF Sequential')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
-    sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, use_linear_model=args.linear,
+    sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, invertible_flow=args.invertible_flow,
                   **sfdqn_params, **agent_params)
 
     # train SFDQN
