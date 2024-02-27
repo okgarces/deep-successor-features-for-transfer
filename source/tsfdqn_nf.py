@@ -895,7 +895,9 @@ class TSFDQN:
             if random.random() <= self.test_epsilon:
                 a = random.randrange(self.n_actions)
             else:
-                successor_features = self.sf.get_successors(s_enc)
+                if use_gpi_eval_mode != 'argmax_convex':
+                    successor_features = self.sf.get_successors(s_enc)
+
                 if use_gpi_eval_mode=='naive':
                     q = w(successor_features)[:, :, :, 0]
                     if learn_omegas:
@@ -904,12 +906,21 @@ class TSFDQN:
                     q = q[:, max_task, :]
                     a = torch.argmax(q)
                 elif use_gpi_eval_mode=='argmax_convex':
-                    assert learn_omegas is not True, 'Learn omegas should be True'
-
                     normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+                    t_states = []
+                    for g in self.g_functions:
+                        state = g(s_enc)
+                        t_states.append(state)
+                    # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
+                    t_states = torch.vstack(t_states).unsqueeze(1)
+                    t_states = torch.sum(t_states * normalized_omegas, axis=1).squeeze(1)
+                    successor_features = self.sf.get_successors(t_states)
+
                     q = w(successor_features)[:, :, :, 0]
-                    # a =
-                    raise Exception('Not implemented yet')
+
+                    max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+                    q = q[:, max_task, :]
+                    a = torch.argmax(q)
                 elif use_gpi_eval_mode=='affine_similarity':
                     t_states = []
                     for g in self.g_functions:
@@ -1081,9 +1092,6 @@ class TSFDQN:
         t_states = []
         t_next_states = []
 
-        sum_omegas_normalize = torch.sum(omegas, axis=1, keepdim=True).detach()
-        normalized_omegas = (omegas / sum_omegas_normalize)
-
         with torch.no_grad():
             for g in self.g_functions:
                 state = g(s_torch)
@@ -1096,8 +1104,8 @@ class TSFDQN:
             t_next_states = torch.vstack(t_next_states).unsqueeze(1)
 
         # Code to learn omegas
-        weighted_states = torch.sum(t_states * normalized_omegas, axis=1)
-        weighted_next_states = torch.sum(t_next_states * normalized_omegas, axis=1)
+        weighted_states = torch.sum(t_states * omegas, axis=1)
+        weighted_next_states = torch.sum(t_next_states * omegas, axis=1)
         affine_states = self.h_function(weighted_states + weighted_next_states)
 
         ####################### Process latent probability transformation
@@ -1109,11 +1117,11 @@ class TSFDQN:
             next_successor_features = self.sf.get_next_successors(s1_torch)
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
-            next_target_tsf = torch.sum(next_successor_features * normalized_omegas, axis=1)[:, a1, :]
+            next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
 
         next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
 
-        tsf = torch.sum(successor_features * normalized_omegas, axis=1)[:, a ,:]
+        tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
         loss_task = torch.nn.MSELoss()
 
         r_fit = w_approx(transformed_phi).reshape(-1)
