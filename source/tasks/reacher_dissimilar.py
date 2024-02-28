@@ -9,7 +9,7 @@ from tasks.task import Task
 
 
 class ReacherDissimilar(Task):
-    def __init__(self, target_positions, task_index, torque_multipliers, filenames_mjfc='reacher_dissimilar_nf.cfg', include_target_in_state=False, device=None):
+    def __init__(self, target_positions, task_index, torque_multipliers, filenames_mjfc='reacher_dissimilar_nf.cfg', include_target_in_state=False, device=None, seed=None, features_dim=None):
         super().__init__(device)
 
         self.target_positions = target_positions
@@ -19,6 +19,8 @@ class ReacherDissimilar(Task):
         self.torque_multipliers = torque_multipliers
         self.filenames_mjfc = filenames_mjfc
         self.env = ReacherBulletEnv(self.target_pos, self.torque_multipliers[task_index], self.filenames_mjfc[task_index])
+        self.seed = seed
+        self.features_dim = features_dim
 
         print(f'Task_Index {self.task_index}, filename {self.filenames_mjfc[self.task_index]}, torque {self.torque_multipliers[self.task_index]}')
         
@@ -35,7 +37,7 @@ class ReacherDissimilar(Task):
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = self.env.reset()
+        state = self.env.reset(self.seed)
         if self.include_target_in_state:
             return np.concatenate([state.flatten(), self.target_pos])
         else:
@@ -79,6 +81,8 @@ class ReacherDissimilar(Task):
         return phi
     
     def feature_dim(self):
+        if self.features_dim is not None:
+            return self.features_dim
         return len(self.target_positions)
     
     def get_w(self):

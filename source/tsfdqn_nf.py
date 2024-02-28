@@ -9,6 +9,37 @@ import random
 
 
 ################################ Features ##################################3
+class PhiFunction(torch.nn.Module):
+    def __init__(self, state_space, action_space, feature_dimension):
+        super(PhiFunction, self).__init__()
+
+        self.alpha_phi: int = 1e-3
+
+        layers = [
+            torch.nn.Linear(state_space * 2 + action_space, 128),
+            torch.nn.ReLU(),
+            torch.nn.Linear(128, 128 * 2),
+            torch.nn.ReLU(),
+            torch.nn.Linear(128 * 2, feature_dimension)
+        ]
+
+        self._model = torch.nn.Sequential(*layers)
+        self.optimiser = torch.optim.Adam(self._model.parameters(), lr=self.alpha_phi)
+        self._model.train() # Train mode
+
+    def forward(self, state, action, next_state):
+
+        inputs = torch.tensor(np.concatenate([state, [action], next_state])).float().to(self.device)
+
+        return self._model(inputs)
+
+    def to(self, device):
+        self.device = device
+        return super().to(device)
+
+    def set_eval(self):
+        self._model.eval()
+
 class DeepTSF:
     """
     A successor feature representation implemented using Keras. Accepts a wide variety of neural networks as
@@ -494,6 +525,7 @@ class TSFDQN:
         self.g_functions = []
         self.h_function = None
         self.invertible_flow = invertible_flow # By default is planar. (MaskedAffineFlow) realnvp. linear.
+        self.learnt_phi = None
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -655,6 +687,10 @@ class TSFDQN:
         
         # remember this experience
         phi = self.phi(s, a, s1)
+
+        if isinstance(phi, torch.Tensor):
+            phi = phi.detach().numpy()
+
         self.buffer.append(s_enc, a, r, phi, s1_enc, gamma)
         
         # update SFs
@@ -775,8 +811,13 @@ class TSFDQN:
         Adds a training task to be trained by the agent.
         """
         self.tasks.append(task)   
-        self.n_tasks = len(self.tasks)  
-        self.phis.append(task.features)               
+        self.n_tasks = len(self.tasks)
+
+        if self.learnt_phi is not None:
+            self.phis.append(self.learnt_phi)
+        else:
+            self.phis.append(task.features)
+
         if self.n_tasks == 1:
             self.n_actions = task.action_count()
             self.n_features = task.feature_dim()
@@ -1080,8 +1121,12 @@ class TSFDQN:
             raise Exception('Affine Function (h) is not initialized')
 
         # Return Loss
-        phi = task.features(s,a,s1)
-        phi_tensor = torch.tensor(phi).float().to(self.device).detach()
+        if self.learnt_phi is not None:
+            phi_tensor = self.phi(s.reshape(-1),a,s1.reshape(-1)) # this must be a share
+        else:
+            phi = task.features(s,a,s1)
+            phi_tensor = torch.tensor(phi).float().to(self.device).detach()
+
         s_torch = torch.tensor(s).float().to(self.device).detach()
         s1_torch = torch.tensor(s1).float().to(self.device).detach()
 
@@ -1154,3 +1199,85 @@ class TSFDQN:
         # Loss, phi_loss, psi_loss
         return loss, l2, l1
 
+
+    def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
+        from utils.buffer import ReplayBuffer
+
+        if feature_dim is None:
+            raise Exception('Feature dim should be sent.')
+
+        # The result of this pre_train is having the first n_samples to fit reconstruct the feature function
+        # At the end the idea is to override a phi function: self.learnt_phi
+        first_task = train_tasks[0]
+        buffer = ReplayBuffer()
+        n_actions = first_task.action_count()
+
+        # action dim tbd and feature dim.
+        # Here I put all the model
+        phi_learn_model = PhiFunction(first_task.encode_dim(), 1, first_task.feature_dim()).to(self.device)
+
+        losses = []
+
+        fit_ws = []
+        fit_ws_optim = []
+
+        # Initialize weights
+        # Having a random policy using
+        for task in train_tasks:
+            fit_w = torch.nn.Linear(task.feature_dim(), 1, bias=False, device=self.device)
+            with torch.no_grad():
+                fit_w.weight = torch.nn.Parameter(torch.Tensor(1, task.feature_dim()).uniform_(-0.01, 0.01).to(self.device))
+
+            fit_w_optim = torch.optim.Adam(fit_w.parameters(), lr=lr)
+
+            fit_ws.append(fit_w)
+            fit_ws_optim.append(fit_w_optim)
+
+        for cycle in range(n_cycles):
+            for task_id, task in enumerate(train_tasks):
+                # Having a random policy using
+                fit_w = fit_ws[task_id]
+                fit_w_optim = fit_ws_optim[task_id]
+
+                s_enc = task.encode(task.initialize())
+
+                for sample in range(n_samples_pre_train):
+                    a = random.randrange(n_actions)
+                    s1, r, terminal = task.transition(a)
+                    s1_enc = task.encode(s1)
+
+                    # state, action, reward.float(), phi, next_state, gamma
+                    buffer.append(s_enc, np.array([a]), r, np.array([0]), s1_enc, np.array([0]))
+
+                    # moving to next_state
+                    s_enc = s1_enc
+
+                    if terminal:
+                        s_enc = task.encode(task.initialize())
+
+                    # update phi model using mini batch
+                    replay = buffer.replay()
+
+                    if replay is not None:
+                        state_batch, action_batch, reward_batch, _, next_state_batch, _ = replay
+                        phis = phi_learn_model(state_batch, action_batch, next_state_batch)  # [B, feature_dim]
+                        linear_combination = fit_w(phis)
+
+                        fit_w_optim.zero_grad()
+                        phi_learn_model.optimiser.zero_grad()
+
+                        loss = torch.nn.functional.mse_loss(reward_batch, linear_combination)
+                        loss.backward()
+                        phi_learn_model.optimiser.step()
+                        fit_w_optim.step()
+
+                        if sample % 100 == 0:
+                            self.logger.log({f'pretrain/source_task_{task_id}/loss': loss.item(), 'episodes': (cycle * n_samples_pre_train) + sample})
+
+                        losses.append(loss.item())
+
+        buffer.reset()
+        self.learnt_phi = phi_learn_model
+        self.learnt_phi.set_eval()
+
+        return losses

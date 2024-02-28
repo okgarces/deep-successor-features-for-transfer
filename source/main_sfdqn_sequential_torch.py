@@ -4,6 +4,8 @@ import argparse
 
 from sfdqn import SFDQN, DeepSF
 from tasks.reacher import Reacher
+from tasks.reacher_dissimilar import ReacherDissimilar
+
 from utils.config import parse_config_file
 from utils.torch import set_torch_device, get_activation, set_random_seed
 from utils.logger import set_logger_level
@@ -26,6 +28,13 @@ task_params = config_params['TASK']
 goals = task_params['train_targets']
 test_goals = task_params['test_targets']
 all_goals = goals + test_goals
+
+train_torque_multipliers = task_params['train_torque_multipliers']
+test_torque_multipliers = task_params['test_torque_multipliers']
+train_filename_mjcf = task_params['train_filename_mjcf']
+test_filename_mjcf = task_params['test_filename_mjcf']
+all_torque_multipliers = train_torque_multipliers + test_torque_multipliers
+all_filename_mjfc = train_filename_mjcf + test_filename_mjcf
     
 agent_params = config_params['AGENT']
 sfdqn_params = config_params['SFDQN']
@@ -35,11 +44,17 @@ device = set_torch_device(use_gpu=use_gpu)
 logger = None
 
 # tasks
-def generate_tasks(include_target):
-    train_tasks = [Reacher(all_goals, i, include_target, device=device) for i in range(len(goals))]
-    test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device) for i in range(len(test_goals))]
-    return train_tasks, test_tasks
+def generate_tasks(include_target, dissimilar=False, seed=None):
 
+    task_build = ReacherDissimilar if dissimilar else Reacher
+    if dissimilar:
+        train_tasks = [ReacherDissimilar(all_goals, i, all_torque_multipliers, all_filename_mjfc,  include_target, device=device, seed=seed) for i in range(len(goals))]
+        test_tasks = [ReacherDissimilar(all_goals, i + len(goals), all_torque_multipliers, all_filename_mjfc, include_target, device=device, seed=seed) for i in range(len(test_goals))]
+    else:
+        train_tasks = [Reacher(all_goals, i, include_target, device=device, seed=seed) for i in range(len(goals))]
+        test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device, seed=seed) for i in range(len(test_goals))]
+
+    return train_tasks, test_tasks
 
 def sf_model_lambda(num_inputs: int, output_dim: int, reshape_dim: tuple, reshape_axis: int = 1) -> ModelTuple:
     model_params = sfdqn_params['model_params']
@@ -80,6 +95,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TSFDQN Reacher environment.')
     parser.add_argument('-seed', type=int, default=26)
     parser.add_argument('-experiment_name', type=str, default=None)
+    parser.add_argument('-dissimilar', default=False, action='store_true')
 
     args = parser.parse_args()
 
@@ -87,7 +103,7 @@ if __name__ == '__main__':
     set_random_seed(args.seed)
     logger = set_logger_level(use_logger=use_logger, prefix=args.experiment_name)
 
-    train_tasks, test_tasks = generate_tasks(False)
+    train_tasks, test_tasks = generate_tasks(False, args.dissimilar, args.seed)
     # build SFDQN    
     print('building SFDQN Sequential')
     deep_sf = DeepSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)

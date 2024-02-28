@@ -8,7 +8,7 @@ from tasks.task import Task
 
 class Reacher(Task):
     
-    def __init__(self, target_positions, task_index, include_target_in_state=False, device=None):
+    def __init__(self, target_positions, task_index, include_target_in_state=False, device=None, seed=None, features_dim=None):
         super(Reacher, self).__init__(device)
 
         self.target_positions = target_positions
@@ -16,6 +16,7 @@ class Reacher(Task):
         self.target_pos = target_positions[task_index]
         self.include_target_in_state = include_target_in_state
         self.env = ReacherBulletEnv(self.target_pos)
+        self.seed = seed
         
         # make the action lookup from integer to real action
         actions = [-1., 0., 1.]
@@ -23,6 +24,8 @@ class Reacher(Task):
         for a1 in actions:
             for a2 in actions:
                 self.action_dict[len(self.action_dict)] = (a1, a2)
+
+        self.features_dim = features_dim
         
     def clone(self):
         return Reacher(self.target_positions, self.task_index, self.include_target_in_state)
@@ -30,7 +33,7 @@ class Reacher(Task):
     def initialize(self):
         # if self.task_index == 0:
         #    self.env.render('human')
-        state = self.env.reset()
+        state = self.env.reset(self.seed)
         if self.include_target_in_state:
             return np.concatenate([state.flatten(), self.target_pos])
         else:
@@ -74,6 +77,9 @@ class Reacher(Task):
         return phi
     
     def feature_dim(self):
+        if self.features_dim is not None:
+            return self.features_dim
+
         return len(self.target_positions)
     
     def get_w(self):

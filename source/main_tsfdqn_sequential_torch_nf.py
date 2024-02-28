@@ -44,15 +44,15 @@ logger = None
 # read parameters from config file
 
 # tasks
-def generate_tasks(include_target, dissimilar=False):
+def generate_tasks(include_target, dissimilar=False, seed=None, phi_dimension=None):
 
     task_build = ReacherDissimilar if dissimilar else Reacher
     if dissimilar:
-        train_tasks = [ReacherDissimilar(all_goals, i, all_torque_multipliers, all_filename_mjfc,  include_target, device=device) for i in range(len(goals))]
-        test_tasks = [ReacherDissimilar(all_goals, i + len(goals), all_torque_multipliers, all_filename_mjfc, include_target, device=device) for i in range(len(test_goals))]
+        train_tasks = [ReacherDissimilar(all_goals, i, all_torque_multipliers, all_filename_mjfc,  include_target, device=device, seed=seed, features_dim=phi_dimension) for i in range(len(goals))]
+        test_tasks = [ReacherDissimilar(all_goals, i + len(goals), all_torque_multipliers, all_filename_mjfc, include_target, device=device, seed=seed, features_dim=phi_dimension) for i in range(len(test_goals))]
     else:
-        train_tasks = [Reacher(all_goals, i, include_target, device=device) for i in range(len(goals))]
-        test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device) for i in range(len(test_goals))]
+        train_tasks = [Reacher(all_goals, i, include_target, device=device, seed=seed, features_dim=phi_dimension) for i in range(len(goals))]
+        test_tasks = [Reacher(all_goals, i + len(goals), include_target, device=device, seed=seed, features_dim=phi_dimension) for i in range(len(test_goals))]
 
     return train_tasks, test_tasks
 
@@ -103,18 +103,26 @@ if __name__ == '__main__':
     parser.add_argument('-invertible_flow', type=str, default='planar', choices=['planar', 'realnvp', 'linear'])
     parser.add_argument('-dissimilar', default=False, action='store_true')
 
+    parser.add_argument('-phi_learning', default=False, action='store_true')
+
     args = parser.parse_args()
 
     # Seed and set logger
     set_random_seed(args.seed)
     logger = set_logger_level(use_logger=use_logger, prefix=args.experiment_name)
 
-    train_tasks, test_tasks = generate_tasks(False, args.dissimilar)
+    phi_dimension = sfdqn_params['hyperparameters']['phi_dimension'] if args.phi_learning else None
+
+    train_tasks, test_tasks = generate_tasks(False, args.dissimilar, args.seed, )
     # build SFDQN    
     print('building TSFDQN With NF Sequential')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
     sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, invertible_flow=args.invertible_flow,
                   **sfdqn_params, **agent_params)
+
+    if args.phi_learning:
+        # remember g_h_function_dims are h and phi function sould have the same dimension.
+        sfdqn.pre_train(train_tasks, 1, feature_dim=sfdqn_params['hyperparameters']['phi_dimension'], lr=sfdqn_params['hyperparameters']['learning_rate_phi'])
 
     # train SFDQN
     print('training TSFDQN With NF Sequential')
