@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from utils.torch import update_models_weights, get_parameters_norm
+from utils.torch import update_models_weights, get_parameters_norm_mean
 from utils.logger import get_logger_level
 import random
 
@@ -367,6 +367,61 @@ class Planar(nn.Module):
 
         return torch.nn.Sequential(*flows)
 
+
+class LinearBatchNorm(nn.Module):
+    """
+    An (invertible) batch normalization layer.
+    This class is mostly inspired from this one:
+    https://github.com/kamenbliznashki/normalizing_flows/blob/master/maf.py
+    """
+
+    def __init__(self, input_size, momentum=0.9, eps=1e-5):
+        super().__init__()
+        self.momentum = momentum
+        self.eps = eps
+
+        self.log_gamma = nn.Parameter(torch.zeros(input_size))
+        self.beta = nn.Parameter(torch.zeros(input_size))
+
+        self.register_buffer('running_mean', torch.zeros(input_size))
+        self.register_buffer('running_var', torch.ones(input_size))
+
+    def forward(self, x, **kwargs):
+        if self.training:
+            self.batch_mean = x.mean(0)
+            self.batch_var = x.var(0)
+
+            self.running_mean.mul_(self.momentum).add_(self.batch_mean.data * (1 - self.momentum))
+            self.running_var.mul_(self.momentum).add_(self.batch_var.data * (1 - self.momentum))
+
+            mean = self.batch_mean
+            var = self.batch_var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_hat = (x - mean) / torch.sqrt(var + self.eps)
+        y = self.log_gamma.exp() * x_hat + self.beta
+
+        # log_det = self.log_gamma - 0.5 * torch.log(var + self.eps)
+
+        return y
+
+    def backward(self, x, **kwargs):
+        if self.training:
+            mean = self.batch_mean
+            var = self.batch_var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+
+        x_hat = (x - self.beta) * torch.exp(-self.log_gamma)
+        x = x_hat * torch.sqrt(var + self.eps) + mean
+
+        log_det = 0.5 * torch.log(var + self.eps) - self.log_gamma
+
+        return x, log_det.expand_as(x).sum(1)
+
 class MaskedAffineFlow(torch.nn.Module):
     """RealNVP as introduced in [arXiv: 1605.08803](https://arxiv.org/abs/1605.08803)
 
@@ -454,7 +509,10 @@ class MaskedAffineFlow(torch.nn.Module):
             s = torch.nn.Sequential(*s_init)
             t = torch.nn.Sequential(*t_init)
             g_function = cls(b, t, s)
+            batch_norm = LinearBatchNorm(input_dim)
+
             flows.append(g_function)
+            flows.append(batch_norm)
 
         return torch.nn.Sequential(*flows)
 
@@ -462,7 +520,7 @@ class MaskedAffineFlow(torch.nn.Module):
 class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
-                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar', **kwargs):
+                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar', learn_omegas_source_task=False, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -526,6 +584,7 @@ class TSFDQN:
         self.h_function = None
         self.invertible_flow = invertible_flow # By default is planar. (MaskedAffineFlow) realnvp. linear.
         self.learnt_phi = None
+        self.learn_omegas_source_task = learn_omegas_source_task,
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -647,7 +706,8 @@ class TSFDQN:
 
         # Transformed Successor Feature
         self.active_g_function = self.g_functions[index]
-        
+        self.active_source_task_omegas = self.omegas_per_source_task[index] if self.learn_omegas_source_task else None
+
     def get_Q_values(self, s, s_enc):
         with torch.no_grad():
             s_enc_torch = torch.tensor(s_enc).float().to(self.device)
@@ -779,21 +839,25 @@ class TSFDQN:
             self.logger.log({f'metrics/source_task_{policy_index}/phis_values_mean': str(torch.mean(phis, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
 
             # Log gradients
-            accum_grads, accum_weights = get_parameters_norm(psi_model)
+            accum_grads, accum_weights, params_mean = get_parameters_norm_mean(psi_model)
             self.logger.log({f'metrics/source_task_{policy_index}/psi_model_gradients_norm':  accum_grads, 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/psi_model_weights_norm': accum_weights, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/psi_model_weights_mean': params_mean, 'timesteps': self.total_training_steps})
 
-            accum_grads, accum_weights = get_parameters_norm(g_function)
+            accum_grads, accum_weights, params_mean = get_parameters_norm_mean(g_function)
             self.logger.log({f'metrics/source_task_{policy_index}/g_function_gradients_norm': accum_grads, 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/g_function_weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/g_function_weights_mean': params_mean, 'timesteps': self.total_training_steps})
 
-            accum_grads, accum_weights = get_parameters_norm(self.h_function)
+            accum_grads, accum_weights, params_mean = get_parameters_norm_mean(self.h_function)
             self.logger.log({f'metrics/source_task_{policy_index}/h_function_gradients_norm': accum_grads, 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/h_function_weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/h_function_weights_mean': params_mean, 'timesteps': self.total_training_steps})
 
-            accum_grads, accum_weights = get_parameters_norm(task_w)
+            accum_grads, accum_weights, params_mean = get_parameters_norm_mean(task_w)
             self.logger.log({f'metrics/source_task_{policy_index}/weights_gradients_norm':  accum_grads, 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/source_task_{policy_index}/weights_mean': params_mean, 'timesteps': self.total_training_steps})
 
         optim.step()
 
@@ -848,8 +912,6 @@ class TSFDQN:
             
         # add tasks
         self.reset()
-        for train_task in train_tasks:
-            self.add_training_task(train_task)
 
         # train each one
         # Regularize sum w_i = 1
@@ -859,6 +921,12 @@ class TSFDQN:
         with torch.no_grad():
             omegas_temp = (omegas_temp / torch.sum(omegas_temp, axis=1, keepdim=True))
         omegas_temp = omegas_temp.requires_grad_(True)
+
+        for train_task in train_tasks:
+            self.add_training_task(train_task)
+            if self.learn_omegas_source_task:
+                omegas_source_task = omegas_temp.clone().detach().requires_grad_(True)
+                self.omegas_per_source_task.append(omegas_source_task)
 
         # Initialize Target Reward Mappers and optimizer
         for test_task in test_tasks:
@@ -955,6 +1023,7 @@ class TSFDQN:
                     # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
                     t_states = torch.vstack(t_states).unsqueeze(1)
                     t_states = torch.sum(t_states * normalized_omegas, axis=1).squeeze(1)
+                    t_states = self.h_function(t_states)
                     successor_features = self.sf.get_successors(t_states)
 
                     q = w(successor_features)[:, :, :, 0]
@@ -1069,7 +1138,7 @@ class TSFDQN:
             if learn_omegas:
                 s1_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
                 a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
-                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, gpi_mode=use_gpi_eval_mode)
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step)
             else:
                 loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
             accum_loss += loss_t.item()
@@ -1111,7 +1180,7 @@ class TSFDQN:
         optim.step()
         return loss, torch.tensor(0), torch.tensor(0)
 
-    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, gpi_mode='affine_similarity'):
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0):
         # GPI modes
         # GPI naive: only argmax_{a} max_{\pi}
         # GPI affine_similarity: argmax_{a} min_{||1-h||} This h could be h(\omega_{i} g^{-i}) or simply h(g^{-i})
@@ -1139,10 +1208,12 @@ class TSFDQN:
 
         with torch.no_grad():
             for g in self.g_functions:
+                g.eval()
                 state = g(s_torch)
                 next_state = g(s1_torch)
                 t_states.append(state)
                 t_next_states.append(next_state)
+                g.train()
 
             # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
             t_states = torch.vstack(t_states).unsqueeze(1)
@@ -1192,7 +1263,17 @@ class TSFDQN:
             omegas.clamp_(epsilon)
             omegas.data = (omegas / torch.sum(omegas, axis=1, keepdim=True)).data
 
-        # Possible we can log the phi values, the transformed states.
+        if eval_step == 0 or eval_step == self.T - 1: # First and Last eval step
+            # Possible we can log the phi values, the transformed states.
+            self.logger.log({f'metrics/target_task_{test_index}/affine_t_states': str(torch.norm(affine_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/affine_t_states_mean': str(torch.mean(affine_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/g_function_t_states': str(torch.norm(weighted_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/g_function_t_next_states': str(torch.norm(weighted_next_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/g_function_t_states_mean': str(torch.mean(weighted_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/g_function_t_next_states_mean': str(torch.mean(weighted_next_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/phis_values': str(torch.norm(transformed_phi, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/phis_values_mean': torch.mean(transformed_phi).item(), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/omegas_mean': torch.mean(omegas).item(), 'timesteps': self.total_training_steps})
 
         # h function train
         self.h_function.train()
