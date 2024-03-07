@@ -739,8 +739,11 @@ class TSFDQN:
         h_function = torch.nn.Linear(input_dim, features_dim, bias=True, device=self.device)
         return h_function
 
-    def _init_omega(self, num_source_tasks):
-        omega = torch.Tensor(1, num_source_tasks, 1, 1).uniform_(0,1).to(self.device).requires_grad_(True)
+    def _init_omega(self, num_source_tasks, method='uniform'):
+        if method == 'uniform':
+            omega = torch.Tensor(1, num_source_tasks, 1, 1).uniform_(0,1).to(self.device).requires_grad_(True)
+        if method == 'constant':
+            omega = torch.ones((1, num_source_tasks, 1, 1)).float().to(self.device).requires_grad_(True)
         return omega
     
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
@@ -906,7 +909,7 @@ class TSFDQN:
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
 
-    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval_mode='vanilla'):
+    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval_mode='vanilla', omegas_init_method='uniform'):
         if viewers is None: 
             viewers = [None] * len(train_tasks)
             
@@ -917,7 +920,7 @@ class TSFDQN:
         # Regularize sum w_i = 1
         # Unsqueeze to have [n_batch, n_tasks, n_actions, n_features]
         # Initialize Omegas
-        omegas_temp = self._init_omega(len(train_tasks))
+        omegas_temp = self._init_omega(len(train_tasks), method=omegas_init_method)
         with torch.no_grad():
             omegas_temp = (omegas_temp / torch.sum(omegas_temp, axis=1, keepdim=True))
         omegas_temp = omegas_temp.requires_grad_(True)
@@ -1138,15 +1141,12 @@ class TSFDQN:
             if learn_omegas:
                 s1_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
                 a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
-                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step)
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
             else:
                 loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
-
-            # Index 1 is for omegas
-            scheduler.step()
 
             # Update states
             s, s_enc = s1, s1_enc
@@ -1180,7 +1180,7 @@ class TSFDQN:
         optim.step()
         return loss, torch.tensor(0), torch.tensor(0)
 
-    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0):
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None):
         # GPI modes
         # GPI naive: only argmax_{a} max_{\pi}
         # GPI affine_similarity: argmax_{a} min_{||1-h||} This h could be h(\omega_{i} g^{-i}) or simply h(g^{-i})
@@ -1256,6 +1256,7 @@ class TSFDQN:
         optim.zero_grad()
         loss.backward()
         optim.step()
+        scheduler.step()
 
         # Sum_i omega_i = 1
         with torch.no_grad():
@@ -1273,6 +1274,7 @@ class TSFDQN:
             self.logger.log({f'metrics/target_task_{test_index}/g_function_t_next_states_mean': str(torch.mean(weighted_next_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/target_task_{test_index}/phis_values': str(torch.norm(transformed_phi, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/target_task_{test_index}/phis_values_mean': torch.mean(transformed_phi).item(), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/omegas_lr': scheduler.get_lr()[1], 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/target_task_{test_index}/omegas_mean': torch.mean(omegas).item(), 'timesteps': self.total_training_steps})
 
         # h function train
