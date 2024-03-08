@@ -104,6 +104,7 @@ if __name__ == '__main__':
     parser.add_argument('-dissimilar', default=False, action='store_true')
 
     parser.add_argument('-phi_learning', default=False, action='store_true')
+    parser.add_argument('-omegas_init_method', default='uniform', choices=['uniform', 'constant'])
 
     args = parser.parse_args()
 
