@@ -105,6 +105,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-phi_learning', default=False, action='store_true')
     parser.add_argument('-omegas_init_method', default='uniform', choices=['uniform', 'constant'])
+    parser.add_argument('-omegas_std_mode', default='average', choices=['average', 'project_simplex'])
 
     args = parser.parse_args()
 
@@ -118,7 +119,7 @@ if __name__ == '__main__':
     # build SFDQN    
     print('building TSFDQN With NF Sequential')
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
-    sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, invertible_flow=args.invertible_flow,
+    sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, invertible_flow=args.invertible_flow, omegas_std_mode=args.omegas_std_mode,
                   **sfdqn_params, **agent_params)
 
     if args.phi_learning:

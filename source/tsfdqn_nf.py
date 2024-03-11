@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from utils.torch import update_models_weights, get_parameters_norm_mean
+from utils.torch import update_models_weights, get_parameters_norm_mean, project_on_simplex
 from utils.logger import get_logger_level
 import random
 
@@ -520,7 +520,7 @@ class MaskedAffineFlow(torch.nn.Module):
 class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
-                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar', learn_omegas_source_task=False, **kwargs):
+                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar', learn_omegas_source_task=False, omegas_std_mode='average', **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -585,6 +585,7 @@ class TSFDQN:
         self.invertible_flow = invertible_flow # By default is planar. (MaskedAffineFlow) realnvp. linear.
         self.learnt_phi = None
         self.learn_omegas_source_task = learn_omegas_source_task,
+        self.omegas_std_mode = omegas_std_mode
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -1114,8 +1115,12 @@ class TSFDQN:
                         self.logger.log({f'eval/target_task_{test_index}/minmax_expected_task': max_task.item(), 'timesteps': self.total_training_steps})
                 else:
                     # Vanilla
-                    normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
-                    tsf = torch.sum(successor_features * normalized_omegas, axis=1)
+
+                    if self.omegas_std_mode == 'average':
+                        normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+                        tsf = torch.sum(successor_features * normalized_omegas, axis=1)
+                    if self.omegas_std_mode == 'project_simplex':
+                        tsf = torch.sum(successor_features * omegas, axis=1)
                     q = w(tsf)
                     # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
                     # Target TSF only Use Q-Learning
@@ -1271,8 +1276,13 @@ class TSFDQN:
         # Sum_i omega_i = 1
         with torch.no_grad():
             epsilon = 1e-7
-            omegas.clamp_(epsilon)
-            omegas.data = (omegas / torch.sum(omegas, axis=1, keepdim=True)).data
+
+            if self.omegas_std_mode == 'average':
+                omegas.clamp_(epsilon)
+                omegas.data = (omegas / torch.sum(omegas, axis=1, keepdim=True)).data
+            if self.omegas_std_mode == 'project_simplex':
+                omegas.data = project_on_simplex(omegas, epsilon=epsilon, device=self.device).data
+
 
         if eval_step == 0 or eval_step == self.T - 1: # First and Last eval step
             # Possible we can log the phi values, the transformed states.
