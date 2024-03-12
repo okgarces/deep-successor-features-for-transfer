@@ -808,7 +808,9 @@ class TSFDQN:
 
         transformed_state = g_function(states)
         transformed_next_state = g_function(next_states)
-        affine_transformed_states = self.h_function(transformed_state) + self.h_function(transformed_next_state)
+        # affine_transformed_states = self.h_function(transformed_state) + self.h_function(transformed_next_state)
+        affine_transformed_states = self.h_function(transformed_state + transformed_next_state)
+
         transformed_phis = affine_transformed_states * phis
 
         with torch.no_grad():
@@ -1231,6 +1233,15 @@ class TSFDQN:
         # Code to learn omegas
         weighted_states = torch.sum(t_states * omegas, axis=1)
         weighted_next_states = torch.sum(t_next_states * omegas, axis=1)
+
+        # affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
+
+        # Remember h(\beta g(x) + \alpha  g(y)) = \beta h(g(x)) + \alpha h(g(y)) if \beta + \alpha = 1.
+        # Otherwise is the definition of linearity.
+        # if self.only_next_states_affine_state:
+        #     affine_states = self.h_function(weighted_next_states)
+        # else:
+
         affine_states = self.h_function(weighted_states + weighted_next_states)
 
         ####################### Process latent probability transformation
