@@ -520,7 +520,8 @@ class MaskedAffineFlow(torch.nn.Module):
 class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
-                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar', learn_omegas_source_task=False, omegas_std_mode='average', **kwargs):
+                 print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar',
+                 learn_omegas_source_task=False, omegas_std_mode='average', only_next_states_affine_state=False, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -586,6 +587,7 @@ class TSFDQN:
         self.learnt_phi = None
         self.learn_omegas_source_task = learn_omegas_source_task,
         self.omegas_std_mode = omegas_std_mode
+        self.only_next_states_affine_state = only_next_states_affine_state
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -809,7 +811,12 @@ class TSFDQN:
         transformed_state = g_function(states)
         transformed_next_state = g_function(next_states)
         # affine_transformed_states = self.h_function(transformed_state) + self.h_function(transformed_next_state)
-        affine_transformed_states = self.h_function(transformed_state + transformed_next_state)
+        # affine_transformed_states = self.h_function(transformed_state + transformed_next_state)
+
+        if self.only_next_states_affine_state:
+            affine_transformed_states = self.h_function(transformed_next_state)
+        else:
+            affine_transformed_states = self.h_function(transformed_state + transformed_next_state)
 
         transformed_phis = affine_transformed_states * phis
 
@@ -1238,11 +1245,10 @@ class TSFDQN:
 
         # Remember h(\beta g(x) + \alpha  g(y)) = \beta h(g(x)) + \alpha h(g(y)) if \beta + \alpha = 1.
         # Otherwise is the definition of linearity.
-        # if self.only_next_states_affine_state:
-        #     affine_states = self.h_function(weighted_next_states)
-        # else:
-
-        affine_states = self.h_function(weighted_states + weighted_next_states)
+        if self.only_next_states_affine_state:
+            affine_states = self.h_function(weighted_next_states)
+        else:
+            affine_states = self.h_function(weighted_states + weighted_next_states)
 
         ####################### Process latent probability transformation
 
