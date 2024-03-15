@@ -1313,6 +1313,12 @@ class TSFDQN:
             self.logger.log({f'metrics/target_task_{test_index}/phis_values_mean': torch.mean(transformed_phi).item(), 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/target_task_{test_index}/omegas_lr': scheduler.get_lr()[1], 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/target_task_{test_index}/omegas_mean': torch.mean(omegas).item(), 'timesteps': self.total_training_steps})
+            self.logger.log({f'metrics/target_task_{test_index}/weights': str(w_approx.weight.data.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+
+            for g_state_index in range(t_states.shape[0]):
+                self.logger.log({f'metrics/target_task_{test_index}/g_function_source_task_{g_state_index}_states': str(t_states[g_state_index].view(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+                self.logger.log({f'metrics/target_task_{test_index}/g_function_source_task_{g_state_index}_next_states': str(t_next_states[g_state_index].view(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+
 
         # h function train
         self.h_function.train()
