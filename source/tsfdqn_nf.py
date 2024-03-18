@@ -1160,7 +1160,7 @@ class TSFDQN:
                 loss_t, phi_loss, psi_loss, q_value_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
             else:
                 loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
-                q_value_loss = 0.0
+                q_value_loss = torch.tensor(0.0)
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
