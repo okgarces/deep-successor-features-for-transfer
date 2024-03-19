@@ -1281,15 +1281,22 @@ class TSFDQN:
         q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
         lasso_coefficient = torch.tensor(self.hyperparameters['omegas_l1_coefficient'])
         ridge_coefficient = torch.tensor(self.hyperparameters['omegas_l2_coefficient'])
+        maxent_coefficient = torch.tensor(self.hyperparameters['omegas_maxent_coefficient'])
         # L1 and L2 Norm
         lasso_regularization = torch.norm(omegas, 1) if lasso_coefficient > 0.0 else torch.tensor(0)
         ridge_regularization = torch.norm(omegas, 2) if ridge_coefficient > 0.0 else torch.tensor(0)
+        entropy_regularization = torch.log(omegas).sum() if maxent_coefficient > 0.0 else torch.tensor(0)
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
         l3 = loss_task(q_value, next_q_value)
 
-        loss = (psi_loss_coefficient * l1) + (r_loss_coefficient * l2) + (q_value_loss_coefficient * l3) + (lasso_coefficient * lasso_regularization) + (ridge_coefficient * ridge_regularization)
+        loss = ((psi_loss_coefficient * l1)
+                + (r_loss_coefficient * l2)
+                + (q_value_loss_coefficient * l3)
+                + (lasso_coefficient * lasso_regularization)
+                + (ridge_coefficient * ridge_regularization)
+                + (maxent_coefficient * entropy_regularization))
 
         optim.zero_grad()
         loss.backward()
