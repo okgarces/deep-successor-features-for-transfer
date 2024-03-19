@@ -81,3 +81,13 @@ def project_on_simplex(v, z=1, epsilon=1e-7, device='cpu'):
     w = torch.maximum(v - theta, torch.ones(v.shape).to(device) * epsilon)
 
     return w.view(initial_shape)
+
+def layer_init(layer, method='xavier', weight_gain=1, bias_const=0, lower_value=-0.01, upper_value=0.01):
+    if isinstance(layer, torch.nn.Linear):
+        if method == "xavier":
+            torch.nn.init.xavier_uniform_(layer.weight, gain=weight_gain)
+        elif method == "orthogonal":
+            torch.nn.init.orthogonal_(layer.weight, gain=weight_gain)
+        elif method == "uniform":
+            torch.nn.init.uniform_(layer.weight, lower_value, upper_value)
+        torch.nn.init.constant_(layer.bias, bias_const)

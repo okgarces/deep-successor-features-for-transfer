@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from utils.torch import update_models_weights, get_parameters_norm_mean, project_on_simplex
+from utils.torch import update_models_weights, get_parameters_norm_mean, project_on_simplex, layer_init
 from utils.logger import get_logger_level
 import random
 
@@ -485,8 +485,9 @@ class MaskedAffineFlow(torch.nn.Module):
 
         flows = []
 
-        for _ in range(n_affine_flows):
+        for n_affine in range(n_affine_flows):
             b = torch.Tensor([1 if i % 2 == 0 else 0 for i in range(input_dim)])
+            b = 1 - b if n_affine % 2 == 0 else b # alternate checkboard
             s_init = torch.nn.ModuleList([
                 torch.nn.Linear(input_dim, 2 * input_dim),
                 torch.nn.ReLU(),
@@ -501,6 +502,8 @@ class MaskedAffineFlow(torch.nn.Module):
                 torch.nn.ReLU(),
                 torch.nn.Linear(2 * input_dim, output_dim),
             ])
+            s_init.apply(lambda layer: layer_init(layer, method='uniform'))
+            t_init.apply(lambda layer: layer_init(layer, method='uniform'))
             nn.init.zeros_(s_init[-1].weight)
             nn.init.zeros_(s_init[-1].bias)
             nn.init.zeros_(t_init[-1].weight)
@@ -832,12 +835,13 @@ class TSFDQN:
         optim.zero_grad()
 
         r_fit = task_w(transformed_phis)
-        beta_loss_coefficient = torch.tensor(self.hyperparameters['beta_loss_coefficient'])
+        psi_loss_coefficient = torch.tensor(self.hyperparameters['source_psi_fit_loss_coefficient'])
+        r_fit_loss_coefficient = torch.tensor(self.hyperparameters['source_r_fit_loss_coefficient'])
 
         l1 = psi_loss(current_psi, merge_current_target_psi)
         l2 = psi_loss(r_fit, rs)
         
-        loss = l1 + (beta_loss_coefficient * l2)
+        loss = (psi_loss_coefficient * l1) + (r_fit_loss_coefficient * l2)
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
@@ -1271,8 +1275,10 @@ class TSFDQN:
         loss_task = torch.nn.MSELoss()
 
         # Hyperparameters and L1 Regularizations
-        beta_loss_coefficient = torch.tensor(self.hyperparameters['beta_loss_coefficient'])
-        beta_q_value_loss_coefficient = torch.tensor(self.hyperparameters['beta_q_value_loss_coefficient'])
+
+        psi_loss_coefficient = torch.tensor(self.hyperparameters['target_psi_fit_loss_coefficient'])
+        r_loss_coefficient = torch.tensor(self.hyperparameters['target_r_fit_loss_coefficient'])
+        q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
         lasso_coefficient = torch.tensor(self.hyperparameters['omegas_l1_coefficient'])
         ridge_coefficient = torch.tensor(self.hyperparameters['omegas_l2_coefficient'])
         # L1 and L2 Norm
@@ -1283,7 +1289,7 @@ class TSFDQN:
         l2 = loss_task(r_fit, r_tensor)
         l3 = loss_task(q_value, next_q_value)
 
-        loss = l1 + (beta_loss_coefficient * l2) + (beta_q_value_loss_coefficient * l3) + (lasso_coefficient * lasso_regularization) + (ridge_coefficient * ridge_regularization)
+        loss = (psi_loss_coefficient * l1) + (r_loss_coefficient * l2) + (q_value_loss_coefficient * l3) + (lasso_coefficient * lasso_regularization) + (ridge_coefficient * ridge_regularization)
 
         optim.zero_grad()
         loss.backward()
@@ -1300,7 +1306,7 @@ class TSFDQN:
             if self.omegas_std_mode == 'project_simplex':
                 omegas.data = project_on_simplex(omegas, epsilon=epsilon, device=self.device).data
 
-
+        # TODO We can add a log flag to avoid this after debugging.
         if eval_step == 0 or eval_step == self.T - 1: # First and Last eval step
             # Possible we can log the phi values, the transformed states.
             self.logger.log({f'metrics/target_task_{test_index}/affine_t_states': str(torch.norm(affine_states, dim=0).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
