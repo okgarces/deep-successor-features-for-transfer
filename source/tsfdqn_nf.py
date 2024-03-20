@@ -1285,7 +1285,7 @@ class TSFDQN:
         # L1 and L2 Norm
         lasso_regularization = torch.norm(omegas, 1) if lasso_coefficient > 0.0 else torch.tensor(0)
         ridge_regularization = torch.norm(omegas, 2) if ridge_coefficient > 0.0 else torch.tensor(0)
-        entropy_regularization = torch.log(omegas).sum() if maxent_coefficient > 0.0 else torch.tensor(0)
+        entropy_regularization = (omegas * torch.log(omegas)).sum() if maxent_coefficient > 0.0 else torch.tensor(0)
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
