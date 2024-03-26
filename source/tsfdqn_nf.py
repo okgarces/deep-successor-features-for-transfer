@@ -491,14 +491,18 @@ class MaskedAffineFlow(torch.nn.Module):
             s_init = torch.nn.ModuleList([
                 torch.nn.Linear(input_dim, 2 * input_dim),
                 torch.nn.ReLU(),
-                torch.nn.Linear(2 * input_dim, 2 * input_dim),
+                torch.nn.Linear(2 * input_dim, 64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64, 2 * input_dim),
                 torch.nn.ReLU(),
                 torch.nn.Linear(2 * input_dim, output_dim),
             ])
             t_init = torch.nn.ModuleList([
                 torch.nn.Linear(input_dim, 2 * input_dim),
                 torch.nn.ReLU(),
-                torch.nn.Linear(2 * input_dim, 2 * input_dim),
+                torch.nn.Linear(2 * input_dim, 64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64, 2 * input_dim),
                 torch.nn.ReLU(),
                 torch.nn.Linear(2 * input_dim, output_dim),
             ])
