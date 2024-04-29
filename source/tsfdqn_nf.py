@@ -1138,8 +1138,9 @@ class TSFDQN:
                     if self.omegas_std_mode == 'average':
                         normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
                         tsf = torch.sum(successor_features * normalized_omegas, axis=1)
-                    if self.omegas_std_mode == 'project_simplex':
+                    if self.omegas_std_mode in ['project_simplex', 'no_constraint']:
                         tsf = torch.sum(successor_features * omegas, axis=1)
+
                     q = w(tsf)
                     # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
                     # Target TSF only Use Q-Learning
@@ -1252,12 +1253,12 @@ class TSFDQN:
                 t_next_states.append(next_state)
 
             # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
-            t_states = torch.vstack(t_states).unsqueeze(1)
-            t_next_states = torch.vstack(t_next_states).unsqueeze(1)
+            t_states = torch.vstack(t_states).unsqueeze(1).unsqueeze(0)
+            t_next_states = torch.vstack(t_next_states).unsqueeze(1).unsqueeze(0)
 
         # Code to learn omegas
-        weighted_states = torch.sum(t_states * omegas, axis=1)
-        weighted_next_states = torch.sum(t_next_states * omegas, axis=1)
+        weighted_states = torch.sum(t_states * omegas, axis=1).detach() # TODO Remove
+        weighted_next_states = torch.sum(t_next_states * omegas, axis=1).detach() # TODO Remove
 
         # affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
 

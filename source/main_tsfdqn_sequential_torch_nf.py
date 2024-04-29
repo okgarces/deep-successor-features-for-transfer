@@ -105,7 +105,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-phi_learning', default=False, action='store_true')
     parser.add_argument('-omegas_init_method', default='uniform', choices=['uniform', 'constant'])
-    parser.add_argument('-omegas_std_mode', default='average', choices=['average', 'project_simplex'])
+    parser.add_argument('-omegas_std_mode', default='average', choices=['average', 'project_simplex', 'no_constraint'])
     parser.add_argument('-only_next_states_affine_state', default=False, action='store_true')
 
     args = parser.parse_args()
