@@ -480,8 +480,10 @@ class MaskedAffineFlow(torch.nn.Module):
         return z_  # , log_det
 
     @classmethod
-    def build_planar_flow(cls, input_dim, output_dim, n_affine_flows = 1):
+    def build_flow(cls, input_dim, output_dim, n_affine_flows = 1):
         n_affine_flows = 1 if n_affine_flows == 0 else n_affine_flows
+
+        assert n_affine_flows >= 2, 'Masked Affine Transformation will keep only part of the variables set. Min 2 layers'
 
         flows = []
 
@@ -732,7 +734,7 @@ class TSFDQN:
         if self.invertible_flow == 'linear':
             g_function = torch.nn.Linear(states_dim, output_dim, bias=True, device=self.device)
         elif self.invertible_flow == 'realnvp':
-            g_function = MaskedAffineFlow.build_planar_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)
+            g_function = MaskedAffineFlow.build_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)
         else:
             # default is planar
             # Number of planarflows = 10
@@ -1167,7 +1169,7 @@ class TSFDQN:
                 a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
                 loss_t, phi_loss, psi_loss, q_value_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
             else:
-                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc)
+                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, test_index, r, s_enc, a, s1_enc, eval_step=target_ev_step)
                 q_value_loss = torch.tensor(0.0)
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
@@ -1189,21 +1191,29 @@ class TSFDQN:
 
         return R, accum_loss, total_phi_loss, total_psi_loss, total_q_value_loss
 
-    def update_test_reward_mapper(self, w_approx, optim, task, r, s, a, s1):
+    def update_test_reward_mapper(self, w_approx, optim, task, test_index, r, s, a, s1, eval_step=0):
+        # This implies we do not use the def. transformed feature function.
         # Return Loss
-        phi = torch.tensor(task.features(s, a, s1)).float().to(self.device)
+        if self.learnt_phi is not None:
+            phi_tensor = self.phi(s.reshape(-1), a, s1.reshape(-1))  # this must be a share
+        else:
+            phi = task.features(s, a, s1)
+            phi_tensor = torch.tensor(phi).float().to(self.device).detach()
+
         loss_task = torch.nn.MSELoss()
 
         with torch.no_grad():
             r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         optim.zero_grad()
-
-        r_fit = w_approx(phi)
+        r_fit = w_approx(phi_tensor)
         loss = loss_task(r_fit, r_tensor)
         loss.backward()
-
         optim.step()
+
+        if eval_step == 0 or eval_step == self.T - 1:
+            self.logger.log({f'metrics/target_task_{test_index}/weights': str(w_approx.weight.data.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+
         return loss, torch.tensor(0), torch.tensor(0)
 
     def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None):
