@@ -1253,12 +1253,12 @@ class TSFDQN:
                 t_next_states.append(next_state)
 
             # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
-            t_states = torch.vstack(t_states).unsqueeze(1).unsqueeze(0)
-            t_next_states = torch.vstack(t_next_states).unsqueeze(1).unsqueeze(0)
+            t_states = torch.vstack(t_states).unsqueeze(1).unsqueeze(0).detach()
+            t_next_states = torch.vstack(t_next_states).unsqueeze(1).unsqueeze(0).detach()
 
         # Code to learn omegas
-        weighted_states = torch.sum(t_states * omegas, axis=1).detach() # TODO Remove
-        weighted_next_states = torch.sum(t_next_states * omegas, axis=1).detach() # TODO Remove
+        weighted_states = torch.sum(t_states * omegas, axis=1)
+        weighted_next_states = torch.sum(t_next_states * omegas, axis=1)
 
         # affine_states = self.h_function(weighted_states) + self.h_function(weighted_next_states)
 
@@ -1273,13 +1273,12 @@ class TSFDQN:
 
         transformed_phi = phi_tensor * affine_states.squeeze(0)
 
-        with torch.no_grad():
-            successor_features = self.sf.get_successors(s_torch) # n_batch, n_tasks, n_actions, n_features
-            next_successor_features = self.sf.get_next_successors(s1_torch)
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        successor_features = self.sf.get_successors(s_torch).detach() # n_batch, n_tasks, n_actions, n_features
+        next_successor_features = self.sf.get_next_successors(s1_torch).detach()
+        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device).detach()
 
-            next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
-            next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
+        next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
+        next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
 
         r_fit = w_approx(transformed_phi).reshape(-1)
         next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
