@@ -967,7 +967,7 @@ class TSFDQN:
             # Learning rate alpha (Weights)
             parameters = [
                 {'params': w_approx.parameters(),
-                 'lr': self.hyperparameters['learning_rate_w'],
+                 'lr': self.hyperparameters['learning_rate_w_target_task'],
                  'weight_decay': self.hyperparameters['weight_decay_w']},
                 {'params': omegas_target_task,
                  'lr': self.hyperparameters['learning_rate_omega'],
@@ -1166,7 +1166,7 @@ class TSFDQN:
             s1_enc = self.encoding(s1)
 
             if learn_omegas:
-                s1_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
+                s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
                 a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
                 loss_t, phi_loss, psi_loss, q_value_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
             else:
