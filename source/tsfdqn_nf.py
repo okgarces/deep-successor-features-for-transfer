@@ -929,8 +929,9 @@ class TSFDQN:
         # SF model will keep the model optimizer
         self.sf.add_training_task(task, None, g_function, self.h_function)
 
-    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval_mode='vanilla', omegas_init_method='uniform'):
-        if viewers is None: 
+    def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval_mode='vanilla', omegas_init_method='uniform', learn_weights=True):
+
+        if viewers is None:
             viewers = [None] * len(train_tasks)
             
         # add tasks
@@ -956,6 +957,10 @@ class TSFDQN:
             omegas_target_task = omegas_temp.clone().detach().requires_grad_(True)
 
             fit_w = torch.Tensor(1, test_task.feature_dim()).uniform_(-0.01, 0.01).to(self.device)
+
+            if not learn_weights: # to not learn fit_w
+                fit_w = torch.tensor(test_task.get_w()).float().to(self.device).reshape(1, test_task.feature_dim()) # for real w.
+
             w_approx = torch.nn.Linear(test_task.feature_dim(), 1, bias=False, device=self.device)
             # w_approx = torch.nn.Linear(test_task.feature_dim(), 1, device=self.device)
 
@@ -967,7 +972,7 @@ class TSFDQN:
             # Learning rate alpha (Weights)
             parameters = [
                 {'params': w_approx.parameters(),
-                 'lr': self.hyperparameters['learning_rate_w_target_task'],
+                 'lr': self.hyperparameters['learning_rate_w_target_task'] if learn_weights else 0.0,
                  'weight_decay': self.hyperparameters['weight_decay_w']},
                 {'params': omegas_target_task,
                  'lr': self.hyperparameters['learning_rate_omega'],

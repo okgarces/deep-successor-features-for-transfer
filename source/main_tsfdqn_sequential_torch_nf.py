@@ -107,6 +107,7 @@ if __name__ == '__main__':
     parser.add_argument('-omegas_init_method', default='uniform', choices=['uniform', 'constant'])
     parser.add_argument('-omegas_std_mode', default='average', choices=['average', 'project_simplex', 'no_constraint'])
     parser.add_argument('-only_next_states_affine_state', default=False, action='store_true')
+    parser.add_argument('-no_learn_weights', default=True, action='store_false')
 
     args = parser.parse_args()
 
@@ -131,5 +132,5 @@ if __name__ == '__main__':
     # train SFDQN
     print('training TSFDQN With NF Sequential')
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task,
-                learn_omegas=args.no_learn_omegas, use_gpi_eval_mode=args.use_gpi_eval_mode)
+                learn_omegas=args.no_learn_omegas, use_gpi_eval_mode=args.use_gpi_eval_mode, learn_weights=args.no_learn_weights)
     print('End Training TSFDQN with NF Sequential')
