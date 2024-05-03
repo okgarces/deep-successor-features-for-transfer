@@ -1286,12 +1286,11 @@ class TSFDQN:
         with torch.no_grad():
             next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
             next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
+            next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf # TODO to test if transformed
 
         # TODO Remove this. Weights are not being learnt properly.
         r_fit = w_approx(transformed_phi).reshape(-1)
         # r_fit = w_approx(phi_tensor).reshape(-1)
-
-        next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
 
         tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
         q_value = w_approx(tsf).reshape(-1)
