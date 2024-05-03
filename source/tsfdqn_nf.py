@@ -1193,7 +1193,7 @@ class TSFDQN:
         #beta_loss_coefficient = self.hyperparameters['beta_loss_coefficient']
 
         # Fix it seems omegas are being cached
-        self.omegas[test_index] = omegas
+        # self.omegas[test_index] = omegas
 
         return R, accum_loss, total_phi_loss, total_psi_loss, total_q_value_loss
 
