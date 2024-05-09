@@ -679,7 +679,7 @@ class TSFDQN:
         
         # train the agent
         self.train_agent(self.s, self.s_enc, a, r, s1, s1_enc, gamma)
-        
+
         # update counters
         self.s, self.s_enc = s1, s1_enc
         self.steps += 1
@@ -975,7 +975,7 @@ class TSFDQN:
                  'lr': self.hyperparameters['learning_rate_w_target_task'] if learn_weights else 0.0,
                  'weight_decay': self.hyperparameters['weight_decay_w']},
                 {'params': omegas_target_task,
-                 'lr': self.hyperparameters['learning_rate_omega'],
+                 'lr': self.hyperparameters['learning_rate_omega'] if learn_omegas else 0.0,
                  'weight_decay': self.hyperparameters['weight_decay_omega']},
             ]
             optim = torch.optim.Adam(parameters)
@@ -1170,13 +1170,10 @@ class TSFDQN:
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
-            if learn_omegas:
-                s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
-                a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
-                loss_t, phi_loss, psi_loss, q_value_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
-            else:
-                loss_t, phi_loss, psi_loss = self.update_test_reward_mapper(w, optim, task, test_index, r, s_enc, a, s1_enc, eval_step=target_ev_step)
-                q_value_loss = torch.tensor(0.0)
+            s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
+            a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
+            loss_t, phi_loss, psi_loss, q_value_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
+
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
@@ -1196,31 +1193,6 @@ class TSFDQN:
         # self.omegas[test_index] = omegas
 
         return R, accum_loss, total_phi_loss, total_psi_loss, total_q_value_loss
-
-    def update_test_reward_mapper(self, w_approx, optim, task, test_index, r, s, a, s1, eval_step=0):
-        # This implies we do not use the def. transformed feature function.
-        # Return Loss
-        if self.learnt_phi is not None:
-            phi_tensor = self.phi(s.reshape(-1), a, s1.reshape(-1))  # this must be a share
-        else:
-            phi = task.features(s, a, s1)
-            phi_tensor = torch.tensor(phi).float().to(self.device).detach()
-
-        loss_task = torch.nn.MSELoss()
-
-        with torch.no_grad():
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
-
-        optim.zero_grad()
-        r_fit = w_approx(phi_tensor)
-        loss = loss_task(r_fit, r_tensor)
-        loss.backward()
-        optim.step()
-
-        if eval_step == 0 or eval_step == self.T - 1:
-            self.logger.log({f'metrics/target_task_{test_index}/weights': str(w_approx.weight.data.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
-
-        return loss, torch.tensor(0), torch.tensor(0)
 
     def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None):
         # GPI modes
@@ -1324,6 +1296,7 @@ class TSFDQN:
         loss.backward()
         optim.step()
         scheduler.step()
+        # optim.zero_grad() this can be used to make sure no other part we have computed gradients.
 
         # Sum_i omega_i = 1
         with torch.no_grad():
@@ -1361,7 +1334,6 @@ class TSFDQN:
         [g.train() for g in self.g_functions]
         # Loss, phi_loss, psi_loss
         return loss, l2, l1, l3
-
 
     def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
         from utils.buffer import ReplayBuffer

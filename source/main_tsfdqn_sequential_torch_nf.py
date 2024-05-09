@@ -132,5 +132,6 @@ if __name__ == '__main__':
     # train SFDQN
     print('training TSFDQN With NF Sequential')
     sfdqn.train(train_tasks, n_samples, test_tasks=test_tasks, n_test_ev=agent_params['n_test_ev'], cycles_per_task=n_cycles_per_task,
-                learn_omegas=args.no_learn_omegas, use_gpi_eval_mode=args.use_gpi_eval_mode, learn_weights=args.no_learn_weights)
+                learn_omegas=args.no_learn_omegas, use_gpi_eval_mode=args.use_gpi_eval_mode, learn_weights=args.no_learn_weights,
+                omegas_init_method=args.omegas_init_method)
     print('End Training TSFDQN with NF Sequential')
