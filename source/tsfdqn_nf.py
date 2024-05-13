@@ -848,7 +848,7 @@ class TSFDQN:
 
         # TODO change the feature function to fit w.
         r_fit = task_w(transformed_phis)
-        # r_fit = task_w(phis)
+        r_fit_w = task_w(phis)
 
         psi_loss_coefficient = torch.tensor(self.hyperparameters['source_psi_fit_loss_coefficient'])
         r_fit_loss_coefficient = torch.tensor(self.hyperparameters['source_r_fit_loss_coefficient'])
@@ -856,8 +856,9 @@ class TSFDQN:
         l1 = psi_loss(current_psi, merge_current_target_psi)
         l2 = psi_loss(r_fit, rs)
         l3 = psi_loss(current_qs, merge_current_target_q)
-        
-        loss = (psi_loss_coefficient * l1) + (r_fit_loss_coefficient * l2) + (psi_loss_coefficient * l3)
+        l4 = psi_loss(r_fit_w, rs)
+
+        loss = (psi_loss_coefficient * l1) + (r_fit_loss_coefficient * l2) + (psi_loss_coefficient * l3) + (r_fit_loss_coefficient * l4)
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
@@ -1272,7 +1273,7 @@ class TSFDQN:
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
         r_fit = w_approx(transformed_phi).reshape(-1)
-        # r_fit = w_approx(phi_tensor).reshape(-1)
+        r_fit_w = w_approx(phi_tensor).reshape(-1)
 
         next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
         # tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
@@ -1297,10 +1298,12 @@ class TSFDQN:
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
         l3 = loss_task(q_value, next_q_value)
+        l4 = loss_task(r_fit_w, r_tensor)
 
         loss = ((psi_loss_coefficient * l1)
                 + (r_loss_coefficient * l2)
                 + (q_value_loss_coefficient * l3)
+                + (r_loss_coefficient * l4)
                 + (lasso_coefficient * lasso_regularization)
                 + (ridge_coefficient * ridge_regularization)
                 + (maxent_coefficient * entropy_regularization))
