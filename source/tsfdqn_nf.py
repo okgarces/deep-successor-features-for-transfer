@@ -816,6 +816,7 @@ class TSFDQN:
         target_psi_model, *_ = target_psi_tuple
 
         current_psi = psi_model(states)
+        current_qs = task_w(current_psi)  # TODO to use Q in TD.
 
         transformed_state = g_function(states)
         transformed_next_state = g_function(next_states)
@@ -831,12 +832,17 @@ class TSFDQN:
 
         with torch.no_grad():
             next_psis = target_psi_model(next_states)[indices, next_actions,:]
+            next_qs = task_w(next_psis) # TODO to use Q in TD.
 
         targets = transformed_phis + gammas * next_psis
+        targets_q = rs + gammas * next_qs # TODO to use Q in TD.
 
         # train the SF network
         merge_current_target_psi = current_psi.clone()
         merge_current_target_psi[indices, actions,:] = targets
+
+        merge_current_target_q = current_qs.clone() # TODO to use Q in TD.
+        merge_current_target_q[indices, actions, :] = targets_q
 
         optim.zero_grad()
 
@@ -849,8 +855,9 @@ class TSFDQN:
 
         l1 = psi_loss(current_psi, merge_current_target_psi)
         l2 = psi_loss(r_fit, rs)
+        l3 = psi_loss(current_qs, merge_current_target_q)
         
-        loss = (psi_loss_coefficient * l1) + (r_fit_loss_coefficient * l2)
+        loss = (psi_loss_coefficient * l1) + (r_fit_loss_coefficient * l2) + (psi_loss_coefficient * l3)
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
