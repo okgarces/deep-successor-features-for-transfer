@@ -1298,12 +1298,12 @@ class TSFDQN:
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
-        l3 = loss_task(q_value, next_q_value)
+        # l3 = loss_task(q_value, next_q_value)
         # l4 = loss_task(r_fit_transformed, r_tensor)
 
         loss = ((psi_loss_coefficient * l1)
                 + (r_loss_coefficient * l2)
-                + (q_value_loss_coefficient * l3)
+                # + (q_value_loss_coefficient * l3)
                 # + (r_loss_coefficient * l4)
                 + (lasso_coefficient * lasso_regularization)
                 + (ridge_coefficient * ridge_regularization)
