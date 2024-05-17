@@ -1350,7 +1350,7 @@ class TSFDQN:
         # g function eval
         [g.train() for g in self.g_functions]
         # Loss, phi_loss, psi_loss
-        return loss, l2, l1, l3
+        return loss, l2, l1, loss # TODO Remember to restore l3
 
     def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
         from utils.buffer import ReplayBuffer
