@@ -1300,21 +1300,51 @@ class TSFDQN:
         l2 = loss_task(r_fit, r_tensor)
         # l3 = loss_task(q_value, next_q_value)
         # l4 = loss_task(r_fit_transformed, r_tensor)
+        l5 = loss_task(affine_states, torch.ones(affine_states.shape))
 
-        loss = (
-                (psi_loss_coefficient * l1)
-                + (r_loss_coefficient * l2)
-                # + (q_value_loss_coefficient * l3)
-                # + (r_loss_coefficient * l4)
-                + (lasso_coefficient * lasso_regularization)
-                + (ridge_coefficient * ridge_regularization)
-                + (maxent_coefficient * entropy_regularization))
 
+        # loss = (
+        #         (psi_loss_coefficient * l1)
+        #         # + (r_loss_coefficient * l2)
+        #         # + (q_value_loss_coefficient * l3)
+        #         # + (r_loss_coefficient * l4)
+        #         # + (r_loss_coefficient * l5)
+        #         + (lasso_coefficient * lasso_regularization)
+        #         + (ridge_coefficient * ridge_regularization)
+        #         + (maxent_coefficient * entropy_regularization))
+
+        # loss_1 = l1 + l4 # Original loss.
+        # optim.zero_grad()
+        # loss_1.backward(retain_graph=True)
+        # print('loss1', w_approx.weight.grad.flatten())
+        # print('loss1', omegas.grad.flatten())
+
+        loss_2 = l1 + l2 + l5
+        # optim.zero_grad()
+        # loss_2.backward(retain_graph=True)
+        # print('loss2', w_approx.weight.grad.flatten())
+        # print('loss2', omegas.grad.flatten())
+
+        # loss_3 = l1 + l2 + l3
+        # optim.zero_grad()
+        # loss_3.backward(retain_graph=True)
+        # print('loss3', w_approx.weight.grad.flatten())
+        # print('loss3', omegas.grad.flatten())
+
+        # loss_4 = l1 + l2 # Current loss.
+        # optim.zero_grad()
+        # loss_4.backward(retain_graph=True)
+        # print('loss4', w_approx.weight.grad.flatten())
+        # print('loss4', omegas.grad.flatten())
+
+        # Tetst different gradients over omegas and weights.
+
+        loss = loss_2
         optim.zero_grad()
         loss.backward()
         optim.step()
         scheduler.step()
-        # optim.zero_grad() this can be used to make sure no other part we have computed gradients.
+        # optim.zero_grad() # this can be used to make sure no other part we have computed gradients.
 
         # Sum_i omega_i = 1
         with torch.no_grad():
@@ -1351,7 +1381,7 @@ class TSFDQN:
         # g function eval
         [g.train() for g in self.g_functions]
         # Loss, phi_loss, psi_loss
-        return loss, l2, l1, loss # TODO Remember to restore l3
+        return loss, l2, l1, l5 # TODO Remember to restore l3
 
     def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
         from utils.buffer import ReplayBuffer
