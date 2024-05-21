@@ -1267,9 +1267,9 @@ class TSFDQN:
 
         # TODO Remove this. This is to double check that omegas are not being learnt as that suppose to do.
         # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
-        with torch.no_grad():
-            next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
-            next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
+        # with torch.no_grad():
+        next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
+        # next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
@@ -1279,7 +1279,7 @@ class TSFDQN:
         next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
         # tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
         tsf = torch.sum(successor_features * omegas, axis=1) # TODO Update the entire q table
-        q_value = w_approx(tsf).reshape(-1)
+        # q_value = w_approx(tsf).reshape(-1)
 
         loss_task = lambda input, target: torch.sum((input - target) ** 2).mean()
 
@@ -1287,7 +1287,7 @@ class TSFDQN:
 
         psi_loss_coefficient = torch.tensor(self.hyperparameters['target_psi_fit_loss_coefficient'])
         r_loss_coefficient = torch.tensor(self.hyperparameters['target_r_fit_loss_coefficient'])
-        q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
+        # q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
         lasso_coefficient = torch.tensor(self.hyperparameters['omegas_l1_coefficient'])
         ridge_coefficient = torch.tensor(self.hyperparameters['omegas_l2_coefficient'])
         maxent_coefficient = torch.tensor(self.hyperparameters['omegas_maxent_coefficient'])
@@ -1298,13 +1298,13 @@ class TSFDQN:
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
-        l3 = loss_task(q_value, next_q_value)
+        # l3 = loss_task(q_value, next_q_value)
         # l4 = loss_task(r_fit_transformed, r_tensor)
 
         loss = (
                 (psi_loss_coefficient * l1)
                 + (r_loss_coefficient * l2)
-                + (q_value_loss_coefficient * l3)
+                # + (q_value_loss_coefficient * l3)
                 # + (r_loss_coefficient * l4)
                 + (lasso_coefficient * lasso_regularization)
                 + (ridge_coefficient * ridge_regularization)
