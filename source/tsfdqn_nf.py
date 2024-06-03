@@ -27,9 +27,12 @@ class PhiFunction(torch.nn.Module):
         self.optimiser = torch.optim.Adam(self._model.parameters(), lr=self.alpha_phi)
         self._model.train() # Train mode
 
-    def forward(self, state, action, next_state):
+    def forward(self, state, action, next_state, has_batch=False):
 
-        inputs = torch.tensor(np.concatenate([state, [action], next_state])).float().to(self.device)
+        if has_batch:
+            inputs = torch.cat([state, action.unsqueeze(-1), next_state], dim=-1)
+        else:
+            inputs = torch.tensor(np.concatenate([state, [action], next_state])).float().to(self.device)
 
         return self._model(inputs)
 
@@ -530,7 +533,8 @@ class TSFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
                  print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar',
-                 learn_omegas_source_task=False, omegas_std_mode='average', only_next_states_affine_state=False, **kwargs):
+                 learn_transformed_function=False, learn_omegas_source_task=False, omegas_std_mode='average',
+                 only_next_states_affine_state=False, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -597,6 +601,7 @@ class TSFDQN:
         self.learn_omegas_source_task = learn_omegas_source_task,
         self.omegas_std_mode = omegas_std_mode
         self.only_next_states_affine_state = only_next_states_affine_state
+        self.learn_transformed_function = learn_transformed_function
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -761,6 +766,7 @@ class TSFDQN:
     def train_agent(self, s, s_enc, a, r, s1, s1_enc, gamma):
         
         # remember this experience
+        # This phi should be the known/shared given feature function.
         phi = self.phi(s, a, s1)
 
         if isinstance(phi, torch.Tensor):
@@ -771,18 +777,7 @@ class TSFDQN:
         # update SFs
         if self.total_training_steps % 1 == 0:
             transitions = self.buffer.replay()
-            losses = self.update_successor(transitions, self.task_index, self.use_gpi)
-
-            # Print weights for Reward Mapper
-            if self.total_training_steps % 1000 == 0:
-                if isinstance(losses, tuple):
-                    total_loss, psi_loss, phi_loss = losses
-                    self.logger.log({f'losses/source_task_{self.task_index}/total_loss': total_loss.item(), 'timesteps': self.total_training_steps})
-                    self.logger.log({f'losses/source_task_{self.task_index}/phi_loss': phi_loss.item(), 'timesteps': self.total_training_steps})
-                    self.logger.log({f'losses/source_task_{self.task_index}/psi_loss': psi_loss.item(), 'timesteps': self.total_training_steps})
-
-                task_w = self.sf.fit_w[self.task_index]
-                self.logger.log({f'train/source_task_{self.task_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+            self.update_successor(transitions, self.task_index, self.use_gpi)
 
     def update_successor(self, transitions, policy_index, use_gpi=True):
         if transitions is None:
@@ -828,7 +823,10 @@ class TSFDQN:
         else:
             affine_transformed_states = self.h_function(transformed_state + transformed_next_state)
 
-        transformed_phis = affine_transformed_states * phis
+        if self.learn_transformed_function:
+            transformed_phis = affine_transformed_states * self.transformed_phi_function(states, actions, states, has_batch=True)
+        else:
+            transformed_phis = affine_transformed_states * phis
 
         with torch.no_grad():
             next_psis = target_psi_model(next_states)[indices, next_actions,:]
@@ -859,6 +857,11 @@ class TSFDQN:
         # l4 = psi_loss(r_fit_transformed, rs)
 
         loss = (psi_loss_coefficient * l1) + (r_fit_loss_coefficient * l2) + (psi_loss_coefficient * l3) # + (r_fit_loss_coefficient * l4)
+
+        if self.learn_transformed_function:
+            l5 = psi_loss(phis, transformed_phis)
+            loss += psi_loss_coefficient * l5
+
         loss.backward()
 
         # log gradients this is only a way to track gradients from time to time
@@ -893,6 +896,29 @@ class TSFDQN:
             self.logger.log({f'metrics/source_task_{policy_index}/weights_norm':  accum_weights, 'timesteps': self.total_training_steps})
             self.logger.log({f'metrics/source_task_{policy_index}/weights_mean': params_mean, 'timesteps': self.total_training_steps})
 
+            self.logger.log({f'losses/source_task_{policy_index}/total_loss': loss.item(),
+                             'timesteps': self.total_training_steps})
+            self.logger.log({f'losses/source_task_{policy_index}/phi_loss': l2.item(),
+                             'timesteps': self.total_training_steps})
+            self.logger.log({f'losses/source_task_{policy_index}/psi_loss': l1.item(),
+                             'timesteps': self.total_training_steps})
+            self.logger.log({f'losses/source_task_{policy_index}/q_loss': l3.item(),
+                             'timesteps': self.total_training_steps})
+
+            if self.learn_transformed_function:
+                self.logger.log({f'losses/source_task_{policy_index}/transformed_phi_loss': l5.item(),
+                                 'timesteps': self.total_training_steps})
+                accum_grads, accum_weights, params_mean = get_parameters_norm_mean(self.transformed_phi_function)
+                self.logger.log({f'metrics/source_task_{policy_index}/transformed_phi_gradients_norm': accum_grads,
+                                 'timesteps': self.total_training_steps})
+                self.logger.log({f'metrics/source_task_{policy_index}/transformed_phi_norm': accum_weights,
+                                 'timesteps': self.total_training_steps})
+                self.logger.log({f'metrics/source_task_{policy_index}/transformed_phi_mean': params_mean,
+                                 'timesteps': self.total_training_steps})
+
+            task_w = self.sf.fit_w[policy_index]
+            self.logger.log({f'train/source_task_{policy_index}/weights': str(task_w.weight.clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
+
         optim.step()
 
         # Finish train the SF network
@@ -901,8 +927,6 @@ class TSFDQN:
         if self.sf.updates_since_target_updated[policy_index] >= self.sf.target_update_ev:
             update_models_weights(psi_model, target_psi_model)
             self.sf.updates_since_target_updated[policy_index] = 0
-
-        return loss, l1, l2 
 
     def add_training_task(self, task):
         """
@@ -921,6 +945,10 @@ class TSFDQN:
             self.n_features = task.feature_dim()
             if self.encoding == 'task':
                 self.encoding = task.encode
+
+            if self.learn_transformed_function and self.learnt_phi is None:
+                # This transformed phi function is the feature function we will learn.
+                self.transformed_phi_function = PhiFunction(task.encode_dim(), 1, task.feature_dim()).to(self.device)
     
 
         # Sequential Learning Append Buffer
@@ -1013,7 +1041,7 @@ class TSFDQN:
                     if t % n_test_ev == 0:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
-                            R, accum_loss, total_phi_loss, total_psi_loss, total_q_value_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, use_gpi_eval_mode=use_gpi_eval_mode)
+                            R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, use_gpi_eval_mode=use_gpi_eval_mode)
                             Rs.append(R)
 
                             self.logger.log({f'eval/target_task_{test_index}/omegas': str(self.omegas[test_index].clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
@@ -1022,6 +1050,7 @@ class TSFDQN:
                             self.logger.log({f'losses/target_task_{test_index}/phi_loss': total_phi_loss, 'timesteps': self.total_training_steps})
                             self.logger.log({f'losses/target_task_{test_index}/psi_loss': total_psi_loss, 'timesteps': self.total_training_steps})
                             self.logger.log({f'losses/target_task_{test_index}/q_value_loss': total_q_value_loss, 'timesteps': self.total_training_steps})
+                            self.logger.log({f'losses/target_task_{test_index}/total_transformed_phi_loss': total_transformed_phi_loss, 'timesteps': self.total_training_steps})
 
                         avg_R = np.mean(Rs)
                         return_data.append(avg_R)
@@ -1174,6 +1203,7 @@ class TSFDQN:
         total_phi_loss = 0
         total_psi_loss = 0
         total_q_value_loss = 0
+        total_transformed_phi_loss = 0
 
         for target_ev_step in range(self.T):
             s_enc_torch = torch.tensor(s_enc).float().to(self.device).detach()
@@ -1183,12 +1213,13 @@ class TSFDQN:
 
             s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
             a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
-            loss_t, phi_loss, psi_loss, q_value_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
+            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
 
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
             total_psi_loss += psi_loss.item()
             total_q_value_loss += q_value_loss.item()
+            total_transformed_phi_loss += transformed_phi_loss.item()
 
             # Update states
             s, s_enc = s1, s1_enc
@@ -1203,7 +1234,7 @@ class TSFDQN:
         # Fix it seems omegas are being cached
         # self.omegas[test_index] = omegas
 
-        return R, accum_loss, total_phi_loss, total_psi_loss, total_q_value_loss
+        return R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss
 
     def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None):
         # GPI modes
@@ -1220,6 +1251,9 @@ class TSFDQN:
         else:
             phi = task.features(s,a,s1)
             phi_tensor = torch.tensor(phi).float().to(self.device).detach()
+
+            if self.learn_transformed_function:
+                transformed_phi_tensor = self.transformed_phi_function(s.reshape(-1),a,s1.reshape(-1))
 
         s_torch = torch.tensor(s).float().to(self.device).detach()
         s1_torch = torch.tensor(s1).float().to(self.device).detach()
@@ -1259,7 +1293,10 @@ class TSFDQN:
 
         ####################### Process latent probability transformation
 
-        transformed_phi = phi_tensor * affine_states.squeeze(0)
+        if self.learn_transformed_function:
+            transformed_phi = transformed_phi_tensor * affine_states.squeeze(0)
+        else:
+            transformed_phi = phi_tensor * affine_states.squeeze(0)
 
         successor_features = self.sf.get_successors(s_torch).detach() # n_batch, n_tasks, n_actions, n_features
         next_successor_features = self.sf.get_next_successors(s1_torch).detach()
@@ -1267,19 +1304,20 @@ class TSFDQN:
 
         # TODO Remove this. This is to double check that omegas are not being learnt as that suppose to do.
         # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
-        # with torch.no_grad():
-        next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
-        # next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
+        with torch.no_grad():
+            next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
+            next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
         # r_fit_transformed = w_approx(transformed_phi).reshape(-1)
         r_fit = w_approx(phi_tensor).reshape(-1)
 
-        next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
+        with torch.no_grad():
+            next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
         # tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
         tsf = torch.sum(successor_features * omegas, axis=1) # TODO Update the entire q table
-        # q_value = w_approx(tsf).reshape(-1)
+        q_value = w_approx(tsf).reshape(-1)
 
         loss_task = lambda input, target: torch.sum((input - target) ** 2).mean()
 
@@ -1287,7 +1325,7 @@ class TSFDQN:
 
         psi_loss_coefficient = torch.tensor(self.hyperparameters['target_psi_fit_loss_coefficient'])
         r_loss_coefficient = torch.tensor(self.hyperparameters['target_r_fit_loss_coefficient'])
-        # q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
+        q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
         lasso_coefficient = torch.tensor(self.hyperparameters['omegas_l1_coefficient'])
         ridge_coefficient = torch.tensor(self.hyperparameters['omegas_l2_coefficient'])
         maxent_coefficient = torch.tensor(self.hyperparameters['omegas_maxent_coefficient'])
@@ -1298,48 +1336,24 @@ class TSFDQN:
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor)
-        # l3 = loss_task(q_value, next_q_value)
+        l3 = loss_task(q_value, next_q_value)
         # l4 = loss_task(r_fit_transformed, r_tensor)
-        l5 = loss_task(affine_states, torch.ones(affine_states.shape))
+        l5 = torch.tensor(0.0)
 
+        loss = (
+                (psi_loss_coefficient * l1)
+                + (r_loss_coefficient * l2)
+                + (q_value_loss_coefficient * l3)
+                # + (r_loss_coefficient * l4)
+                # + (r_loss_coefficient * l5)
+                + (lasso_coefficient * lasso_regularization)
+                + (ridge_coefficient * ridge_regularization)
+                + (maxent_coefficient * entropy_regularization))
 
-        # loss = (
-        #         (psi_loss_coefficient * l1)
-        #         # + (r_loss_coefficient * l2)
-        #         # + (q_value_loss_coefficient * l3)
-        #         # + (r_loss_coefficient * l4)
-        #         # + (r_loss_coefficient * l5)
-        #         + (lasso_coefficient * lasso_regularization)
-        #         + (ridge_coefficient * ridge_regularization)
-        #         + (maxent_coefficient * entropy_regularization))
+        if self.learn_transformed_function:
+            l5 = loss_task(transformed_phi, phi_tensor)
+            loss += l5
 
-        # loss_1 = l1 + l4 # Original loss.
-        # optim.zero_grad()
-        # loss_1.backward(retain_graph=True)
-        # print('loss1', w_approx.weight.grad.flatten())
-        # print('loss1', omegas.grad.flatten())
-
-        loss_2 = l1 + l2 + l5
-        # optim.zero_grad()
-        # loss_2.backward(retain_graph=True)
-        # print('loss2', w_approx.weight.grad.flatten())
-        # print('loss2', omegas.grad.flatten())
-
-        # loss_3 = l1 + l2 + l3
-        # optim.zero_grad()
-        # loss_3.backward(retain_graph=True)
-        # print('loss3', w_approx.weight.grad.flatten())
-        # print('loss3', omegas.grad.flatten())
-
-        # loss_4 = l1 + l2 # Current loss.
-        # optim.zero_grad()
-        # loss_4.backward(retain_graph=True)
-        # print('loss4', w_approx.weight.grad.flatten())
-        # print('loss4', omegas.grad.flatten())
-
-        # Tetst different gradients over omegas and weights.
-
-        loss = loss_2
         optim.zero_grad()
         loss.backward()
         optim.step()
@@ -1381,7 +1395,7 @@ class TSFDQN:
         # g function eval
         [g.train() for g in self.g_functions]
         # Loss, phi_loss, psi_loss
-        return loss, l2, l1, l5 # TODO Remember to restore l3
+        return loss, l1, l2, l3, l5 # TODO Remember to restore l3
 
     def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
         from utils.buffer import ReplayBuffer
