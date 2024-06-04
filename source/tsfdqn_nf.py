@@ -1254,6 +1254,7 @@ class TSFDQN:
 
             if self.learn_transformed_function:
                 transformed_phi_tensor = self.transformed_phi_function(s.reshape(-1),a,s1.reshape(-1))
+                transformed_phi_tensor.eval()
 
         s_torch = torch.tensor(s).float().to(self.device).detach()
         s1_torch = torch.tensor(s1).float().to(self.device).detach()
@@ -1394,6 +1395,8 @@ class TSFDQN:
         self.h_function.train()
         # g function eval
         [g.train() for g in self.g_functions]
+        if self.learn_transformed_function:
+            transformed_phi_tensor.train()
         # Loss, phi_loss, psi_loss
         return loss, l1, l2, l3, l5 # TODO Remember to restore l3
 
