@@ -87,7 +87,7 @@ class DeepTSF:
         self.updates_since_target_updated = []
 
 
-    def add_training_task(self, task, source=None, g_function_model={}, h_function_model={}):
+    def add_training_task(self, task, source=None, g_function_model=None, h_function_model=None, transformed_phi=None):
         """
         Adds a successor feature representation for the specified task.
         
@@ -114,7 +114,7 @@ class DeepTSF:
         self.fit_w.append(w_approx)
 
         # add successor features to the library
-        self.psi.append(self.build_successor(task, source, w_approx, g_function_model, h_function_model))
+        self.psi.append(self.build_successor(task, source, w_approx, g_function_model, h_function_model, transformed_phi))
         self.n_tasks = len(self.psi)
         
         # add statistics
@@ -176,7 +176,7 @@ class DeepTSF:
             self.gpi_counters[task_index][task] += 1
         return q, task
 
-    def build_successor(self, task, source=None, task_w={}, g_function={}, h_function={}):
+    def build_successor(self, task, source=None, task_w=None, g_function=None, h_function=None, transformed_phi=None):
         
         # input tensor for all networks is shared
         # TODO the environment should send the action_count, feature_dim and inputs?
@@ -218,6 +218,14 @@ class DeepTSF:
                  'lr': self.hyperparameters['learning_rate_h'],
                  'weight_decay': self.hyperparameters['weight_decay_h']},
             ]
+
+        if transformed_phi is not None:
+            params.append(
+                {'params': transformed_phi.parameters(),
+                 'lr': self.hyperparameters['learning_rate_h'],
+                 'weight_decay': self.hyperparameters['weight_decay_h']
+                 }
+            )
 
         optim = torch.optim.Adam(params)
         ## build target model and copy the weights 
@@ -602,6 +610,7 @@ class TSFDQN:
         self.omegas_std_mode = omegas_std_mode
         self.only_next_states_affine_state = only_next_states_affine_state
         self.learn_transformed_function = learn_transformed_function
+        self.transformed_phi_function = None
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -966,7 +975,7 @@ class TSFDQN:
             self.h_function = self._init_h_function(g_h_function_dims, task.feature_dim())
 
         # SF model will keep the model optimizer
-        self.sf.add_training_task(task, None, g_function, self.h_function)
+        self.sf.add_training_task(task, None, g_function, self.h_function, self.transformed_phi_function)
 
     def train(self, train_tasks, n_samples, viewers=None, n_view_ev=None, test_tasks=[], n_test_ev=1000, cycles_per_task=1, learn_omegas=True, use_gpi_eval_mode='vanilla', omegas_init_method='uniform', learn_weights=True):
 
@@ -1254,7 +1263,7 @@ class TSFDQN:
 
             if self.learn_transformed_function:
                 transformed_phi_tensor = self.transformed_phi_function(s.reshape(-1),a,s1.reshape(-1))
-                transformed_phi_tensor.eval()
+                self.transformed_phi_function.eval()
 
         s_torch = torch.tensor(s).float().to(self.device).detach()
         s1_torch = torch.tensor(s1).float().to(self.device).detach()
@@ -1396,7 +1405,7 @@ class TSFDQN:
         # g function eval
         [g.train() for g in self.g_functions]
         if self.learn_transformed_function:
-            transformed_phi_tensor.train()
+            self.transformed_phi_function.train()
         # Loss, phi_loss, psi_loss
         return loss, l1, l2, l3, l5 # TODO Remember to restore l3
 
