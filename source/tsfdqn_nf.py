@@ -1325,7 +1325,10 @@ class TSFDQN:
         r_fit = w_approx(phi_tensor).reshape(-1)
 
         # with torch.no_grad():
-        next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
+        # next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
+        # Different next_tsf 2 July 2024
+        next_tsf = phi_tensor + (1 - float(done)) * self.gamma * next_target_tsf
+
         tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
         # tsf = torch.sum(successor_features * omegas, axis=1) # TODO Update the entire q table
         # q_value = w_approx(tsf).reshape(-1)
