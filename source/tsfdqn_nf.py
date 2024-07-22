@@ -1081,7 +1081,7 @@ class TSFDQN:
                     self.total_training_steps += 1
         return return_data
     
-    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval_mode='vanilla', learn_omegas=True, test_index=None):
+    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval_mode='vanilla', learn_omegas=True, test_index=None, has_batch=False):
         """
         use_gpi_eval_mode ['vanilla', 'naive', 'argmax_convex', 'affine_similarity',]
         """
@@ -1205,10 +1205,10 @@ class TSFDQN:
                     q = w(tsf)
                     # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
                     # Target TSF only Use Q-Learning
-                    if self.use_target_replay_buffer:
+                    if has_batch:
                         a  = torch.argmax(q, dim=1).reshape(-1)
                     else:
-                        a = torch.argmax(q)
+                        a = torch.argmax(q).item()
             return a
             
     def test_agent(self, task, test_index, use_gpi_eval_mode='vanilla', learn_omegas=True):
@@ -1287,8 +1287,7 @@ class TSFDQN:
                 return torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf)  # TODO Remember to restore l3
 
             s_torch, a, r_tensor, phi_tensor, s1_torch, gammas = replay
-            a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
-                                      learn_omegas=learn_omegas, test_index=test_index)
+            a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index, has_batch=True)
         else:
             s_torch = torch.tensor(s).float().to(self.device).detach()
             s1_torch = torch.tensor(s1).float().to(self.device).detach()
