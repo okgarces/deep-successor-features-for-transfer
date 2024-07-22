@@ -1292,6 +1292,7 @@ class TSFDQN:
             s1_torch = s1_torch.to(self.device).detach()
             phi_tensor = phi_tensor.to(self.device).detach()
             r_tensor = r_tensor.to(self.device).detach()
+            gammas = gammas.to(self.device).detach()
 
             a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
                                       learn_omegas=learn_omegas, test_index=test_index, has_batch=True)
