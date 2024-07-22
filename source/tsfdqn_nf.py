@@ -1231,8 +1231,7 @@ class TSFDQN:
             s1_enc = self.encoding(s1)
 
             s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
-            a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
-            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
+            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, done, eval_step=target_ev_step, scheduler=scheduler, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
 
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
@@ -1255,7 +1254,7 @@ class TSFDQN:
 
         return R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss
 
-    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None, use_gpi_eval_mode='vanilla', learn_omegas=True):
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, done, eval_step=0, scheduler=None, use_gpi_eval_mode='vanilla', learn_omegas=True):
         # GPI modes
         # GPI naive: only argmax_{a} max_{\pi}
         # GPI affine_similarity: argmax_{a} min_{||1-h||} This h could be h(\omega_{i} g^{-i}) or simply h(g^{-i})
@@ -1288,7 +1287,6 @@ class TSFDQN:
 
             s_torch, a, r_tensor, phi_tensor, s1_torch, gammas = replay
             s_torch = s_torch.to(self.device).detach()
-            a = a.to(self.device).detach()
             s1_torch = s1_torch.to(self.device).detach()
             phi_tensor = phi_tensor.to(self.device).detach()
             r_tensor = r_tensor.to(self.device).detach()
@@ -1303,6 +1301,8 @@ class TSFDQN:
             s1_torch = torch.tensor(s1).float().to(self.device).detach()
             r_tensor = torch.tensor(r).float().to(self.device).detach()
             gammas = self.gamma
+            a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
+                                      learn_omegas=learn_omegas, test_index=test_index)
 
         # h function eval
         self.h_function.eval()
