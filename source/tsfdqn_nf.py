@@ -1287,13 +1287,16 @@ class TSFDQN:
                 return torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf)  # TODO Remember to restore l3
 
             s_torch, a, r_tensor, phi_tensor, s1_torch, gammas = replay
-            a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index, has_batch=True)
-
             s_torch = s_torch.to(self.device).detach()
             a = a.to(self.device).detach()
             s1_torch = s1_torch.to(self.device).detach()
             phi_tensor = phi_tensor.to(self.device).detach()
             r_tensor = r_tensor.to(self.device).detach()
+
+            a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
+                                      learn_omegas=learn_omegas, test_index=test_index, has_batch=True)
+
+
         else:
             s_torch = torch.tensor(s).float().to(self.device).detach()
             s1_torch = torch.tensor(s1).float().to(self.device).detach()
