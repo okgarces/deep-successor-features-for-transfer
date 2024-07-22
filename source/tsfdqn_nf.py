@@ -1081,12 +1081,19 @@ class TSFDQN:
                     self.total_training_steps += 1
         return return_data
     
-    def get_test_action(self, s_enc: torch.Tensor, w, omegas, use_gpi_eval_mode='vanilla', learn_omegas=True, test_index=None, has_batch=False):
+    def get_test_action(self,
+                        s_enc: torch.Tensor,
+                        w, omegas,
+                        use_gpi_eval_mode='vanilla',
+                        learn_omegas=True,
+                        test_index=None,
+                        has_batch=False,
+                        greedy=True):
         """
         use_gpi_eval_mode ['vanilla', 'naive', 'argmax_convex', 'affine_similarity',]
         """
         with torch.no_grad():
-            if random.random() <= self.test_epsilon:
+            if greedy and random.random() <= self.test_epsilon:
                 a = random.randrange(self.n_actions)
             else:
                 if use_gpi_eval_mode != 'argmax_convex':
@@ -1230,7 +1237,6 @@ class TSFDQN:
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
-            s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
             loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, done, eval_step=target_ev_step, scheduler=scheduler, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
 
             accum_loss += loss_t.item()
@@ -1293,7 +1299,7 @@ class TSFDQN:
             gammas = gammas.to(self.device).detach()
 
             a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
-                                      learn_omegas=learn_omegas, test_index=test_index, has_batch=True)
+                                      learn_omegas=learn_omegas, test_index=test_index, has_batch=True, greedy=False)
 
 
         else:
@@ -1302,7 +1308,7 @@ class TSFDQN:
             r_tensor = torch.tensor(r).float().to(self.device).detach()
             gammas = self.gamma
             a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
-                                      learn_omegas=learn_omegas, test_index=test_index)
+                                      learn_omegas=learn_omegas, test_index=test_index, greedy=False)
 
         # h function eval
         self.h_function.eval()
