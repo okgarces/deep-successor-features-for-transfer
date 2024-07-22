@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from utils.buffer import ReplayBuffer
 from utils.torch import update_models_weights, get_parameters_norm_mean, project_on_simplex, layer_init
 from utils.logger import get_logger_level
 import random
@@ -542,7 +543,7 @@ class TSFDQN:
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
                  print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar',
                  learn_transformed_function=False, learn_omegas_source_task=False, omegas_std_mode='average',
-                 only_next_states_affine_state=False, **kwargs):
+                 only_next_states_affine_state=False, use_target_replay_buffer=False, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -602,6 +603,11 @@ class TSFDQN:
         # Transformed Successor Features
         self.omegas_per_source_task = []
         self.omegas = []
+
+        self.use_target_replay_buffer = use_target_replay_buffer
+        self.test_tasks_buffers = []
+
+
         self.g_functions = []
         self.h_function = None
         self.invertible_flow = invertible_flow # By default is planar. (MaskedAffineFlow) realnvp. linear.
@@ -1035,6 +1041,7 @@ class TSFDQN:
             scheduler = torch.optim.lr_scheduler.LambdaLR(optim, [no_op_lambda, lambda_omegas_lr])
             self.test_tasks_weights.append((w_approx, optim, scheduler))
             self.omegas.append(omegas_target_task)
+            self.test_tasks_buffers.append(ReplayBuffer(n_samples=int(((cycles_per_task * n_samples * self.T * len(test_tasks)) / n_test_ev) * 0.01), n_batch=32))
 
         return_data = []
 
@@ -1198,7 +1205,10 @@ class TSFDQN:
                     q = w(tsf)
                     # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
                     # Target TSF only Use Q-Learning
-                    a = torch.argmax(q).item()
+                    if self.use_target_replay_buffer:
+                        a  = torch.argmax(q, dim=1).reshape(-1)
+                    else:
+                        a = torch.argmax(q)
             return a
             
     def test_agent(self, task, test_index, use_gpi_eval_mode='vanilla', learn_omegas=True):
@@ -1222,7 +1232,7 @@ class TSFDQN:
 
             s1_enc_torch = torch.tensor(s1_enc).float().to(self.device).detach()
             a1 = self.get_test_action(s1_enc_torch, w, omegas, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, test_index=test_index)
-            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler)
+            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, a1, done, eval_step=target_ev_step, scheduler=scheduler, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
 
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
@@ -1245,11 +1255,13 @@ class TSFDQN:
 
         return R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss
 
-    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None):
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, a1, done, eval_step=0, scheduler=None, use_gpi_eval_mode='vanilla', learn_omegas=True):
         # GPI modes
         # GPI naive: only argmax_{a} max_{\pi}
         # GPI affine_similarity: argmax_{a} min_{||1-h||} This h could be h(\omega_{i} g^{-i}) or simply h(g^{-i})
         # Vanilla TSF: \sum_{i} \omega_{i}
+
+        test_buffer = self.test_tasks_buffers[test_index]
 
         if self.h_function is None:
             raise Exception('Affine Function (h) is not initialized')
@@ -1265,8 +1277,23 @@ class TSFDQN:
                 transformed_phi_tensor = self.transformed_phi_function(s.reshape(-1),a,s1.reshape(-1))
                 self.transformed_phi_function.eval()
 
-        s_torch = torch.tensor(s).float().to(self.device).detach()
-        s1_torch = torch.tensor(s1).float().to(self.device).detach()
+        if self.use_target_replay_buffer:
+            if not test_buffer.is_full():
+                test_buffer.append(s, a, r, phi, s1, self.gamma)
+
+            replay = test_buffer.replay()
+
+            if replay is None:
+                return torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf), torch.tensor(torch.inf)  # TODO Remember to restore l3
+
+            s_torch, a, r_tensor, phi_tensor, s1_torch, gammas = replay
+            a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
+                                      learn_omegas=learn_omegas, test_index=test_index)
+        else:
+            s_torch = torch.tensor(s).float().to(self.device).detach()
+            s1_torch = torch.tensor(s1).float().to(self.device).detach()
+            r_tensor = torch.tensor(r).float().to(self.device).detach()
+            gammas = self.gamma
 
         # h function eval
         self.h_function.eval()
@@ -1279,14 +1306,14 @@ class TSFDQN:
 
         with torch.no_grad():
             for g in self.g_functions:
-                state = g(s_torch)
-                next_state = g(s1_torch)
+                state = g(s_torch).unsqueeze(1).detach()
+                next_state = g(s1_torch).unsqueeze(1).detach()
                 t_states.append(state)
                 t_next_states.append(next_state)
 
             # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
-            t_states = torch.vstack(t_states).unsqueeze(1).unsqueeze(0).detach()
-            t_next_states = torch.vstack(t_next_states).unsqueeze(1).unsqueeze(0).detach()
+            t_states = torch.stack(t_states, dim=1).detach()
+            t_next_states = torch.stack(t_next_states, dim=1).detach()
 
         # Code to learn omegas
         weighted_states = torch.sum(t_states * omegas, axis=1)
@@ -1304,32 +1331,32 @@ class TSFDQN:
         ####################### Process latent probability transformation
 
         if self.learn_transformed_function:
-            transformed_phi = transformed_phi_tensor * affine_states.squeeze(0)
+            transformed_phi = transformed_phi_tensor * affine_states.squeeze(1 if self.use_target_replay_buffer else 0)
         else:
-            transformed_phi = phi_tensor * affine_states.squeeze(0)
+            transformed_phi = phi_tensor * affine_states.squeeze(1 if self.use_target_replay_buffer else 0)
 
         successor_features = self.sf.get_successors(s_torch).detach() # n_batch, n_tasks, n_actions, n_features
         next_successor_features = self.sf.get_next_successors(s1_torch).detach()
-        r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device).detach()
+
 
         # TODO Remove this. This is to double check that omegas are not being learnt as that suppose to do.
 
         # with torch.no_grad():
         # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
-        next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[:, a1, :]
-        # next_q_value = r_tensor + (1 - float(done)) * self.gamma * w_approx(next_target_tsf).reshape(-1)
+        next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[torch.arange(a1.shape[0]), a1, :]
+        # next_q_value = r_tensor + (1 - float(done)) * gammas * w_approx(next_target_tsf).reshape(-1)
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
         # r_fit_transformed = w_approx(transformed_phi).reshape(-1)
         r_fit = w_approx(phi_tensor).reshape(-1)
 
-        # with torch.no_grad():
-        # next_tsf = transformed_phi + (1 - float(done)) * self.gamma * next_target_tsf
+        # with torch.no_grad(): tested.
+        next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
         # Different next_tsf 2 July 2024
-        next_tsf = phi_tensor + (1 - float(done)) * self.gamma * next_target_tsf
+        # next_tsf = phi_tensor + (1 - float(done)) * gammas * next_target_tsf
 
-        tsf = torch.sum(successor_features * omegas, axis=1)[:, a ,:]
+        tsf = torch.sum(successor_features * omegas, axis=1)[torch.arange(a.shape[0]), a ,:]
         # tsf = torch.sum(successor_features * omegas, axis=1) # TODO Update the entire q table
         # q_value = w_approx(tsf).reshape(-1)
 
@@ -1349,7 +1376,7 @@ class TSFDQN:
         entropy_regularization = (omegas * torch.log(omegas)).sum() if maxent_coefficient > 0.0 else torch.tensor(0)
 
         l1 = loss_task(tsf, next_tsf)
-        l2 = loss_task(r_fit, r_tensor)
+        l2 = loss_task(r_fit, r_tensor.reshape(-1))
         # l3 = loss_task(q_value, next_q_value)
         # l4 = loss_task(r_fit_transformed, r_tensor)
         l5 = torch.tensor(0.0)
@@ -1414,8 +1441,6 @@ class TSFDQN:
         return loss, l1, l2, l5, l5 # TODO Remember to restore l3
 
     def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
-        from utils.buffer import ReplayBuffer
-
         if feature_dim is None:
             raise Exception('Feature dim should be sent.')
 

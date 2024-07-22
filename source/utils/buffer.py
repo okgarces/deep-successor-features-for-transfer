@@ -83,3 +83,6 @@ class ReplayBuffer:
         self.buffer[self.index] = (state, action, reward, phi, next_state, gamma)
         self.size = min(self.size + 1, self.n_samples)
         self.index = (self.index + 1) % self.n_samples
+
+    def is_full(self):
+        return self.size == self.n_samples
