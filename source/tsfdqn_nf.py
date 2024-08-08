@@ -1104,8 +1104,11 @@ class TSFDQN:
                     if learn_omegas:
                         q = omegas[:,:,:,0] * q
                     max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
-                    q = q[:, max_task, :]
-                    a = torch.argmax(q)
+
+                    indices = 0 if len(q.shape) == 0 else np.arange(q.shape[0])
+                    dim = 0 if len(q.shape) == 0 else 1
+                    q = q[indices, max_task, :]
+                    a = torch.argmax(q, dim=dim)
                 elif use_gpi_eval_mode=='argmax_convex':
                     normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
                     t_states = []
@@ -1367,9 +1370,9 @@ class TSFDQN:
         r_fit = w_approx(phi_tensor).reshape(-1)
 
         # with torch.no_grad(): tested.
-        next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
+        # next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
         # Different next_tsf 2 July 2024
-        # next_tsf = phi_tensor + (1 - float(done)) * gammas * next_target_tsf
+        next_tsf = phi_tensor + (1 - float(done)) * gammas * next_target_tsf
 
         tsf = torch.sum(successor_features * omegas, axis=1)[torch.arange(a.shape[0]), a ,:]
         # tsf = torch.sum(successor_features * omegas, axis=1) # TODO Update the entire q table
@@ -1392,14 +1395,14 @@ class TSFDQN:
 
         l1 = loss_task(tsf, next_tsf)
         l2 = loss_task(r_fit, r_tensor.reshape(-1))
-        l3 = loss_task(q_value, next_q_value)
+        # l3 = loss_task(q_value, next_q_value)
         # l4 = loss_task(r_fit_transformed, r_tensor)
         l5 = torch.tensor(0.0)
 
         loss = (
                 (psi_loss_coefficient * l1)
                 + (r_loss_coefficient * l2)
-                + (q_value_loss_coefficient * l3)
+                # + (q_value_loss_coefficient * l3)
                 # + (r_loss_coefficient * l4)
                 # + (r_loss_coefficient * l5)
                 + (lasso_coefficient * lasso_regularization)
@@ -1408,7 +1411,7 @@ class TSFDQN:
 
         if self.learn_transformed_function:
             l5 = loss_task(transformed_phi, phi_tensor)
-            loss += l5
+            # loss += l5
 
         optim.zero_grad()
         loss.backward()
@@ -1453,7 +1456,7 @@ class TSFDQN:
         if self.learn_transformed_function:
             self.transformed_phi_function.train()
         # Loss, phi_loss, psi_loss
-        return loss, l1, l2, l3, l5 # TODO Remember to restore l3
+        return loss, l1, l2, l5, l5 # TODO Remember to restore l3
 
     def pre_train(self, train_tasks, n_samples_pre_train, n_cycles=5, feature_dim=None, lr=1e-3):
         if feature_dim is None:
