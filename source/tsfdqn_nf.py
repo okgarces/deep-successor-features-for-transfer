@@ -1106,9 +1106,12 @@ class TSFDQN:
                     max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
 
                     indices = 0 if len(q.shape) == 0 else np.arange(q.shape[0])
-                    dim = 0 if len(q.shape) == 0 else 1
                     q = q[indices, max_task, :]
-                    a = torch.argmax(q, dim=dim)
+
+                    if has_batch:
+                        a  = torch.argmax(q, dim=1).reshape(-1)
+                    else:
+                        a = torch.argmax(q).item()
                 elif use_gpi_eval_mode=='argmax_convex':
                     normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
                     t_states = []
