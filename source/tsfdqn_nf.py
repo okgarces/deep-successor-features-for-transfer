@@ -1284,7 +1284,7 @@ class TSFDQN:
             phi = task.features(s,a,s1)
             phi_tensor = torch.tensor(phi).float().to(self.device).detach()
 
-            if self.learn_transformed_function:
+            if not self.use_target_replay_buffer and self.learn_transformed_function:
                 transformed_phi_tensor = self.transformed_phi_function(s.reshape(-1),a,s1.reshape(-1))
                 self.transformed_phi_function.eval()
 
@@ -1304,6 +1304,10 @@ class TSFDQN:
             r_tensor = r_tensor.to(self.device).detach()
             gammas = gammas.to(self.device).detach()
 
+            if self.learn_transformed_function:
+                self.transformed_phi_function.eval()
+                transformed_phi_tensor = self.transformed_phi_function(s_torch, a, s1_torch, has_batch=True)
+
             a1 = self.get_test_action(s1_torch, w_approx, omegas, use_gpi_eval_mode=use_gpi_eval_mode,
                                       learn_omegas=learn_omegas, test_index=test_index, has_batch=True, greedy=False)
 
@@ -1320,6 +1324,8 @@ class TSFDQN:
         self.h_function.eval()
         # g function eval
         [g.eval() for g in self.g_functions]
+
+
 
         # Transformed States
         t_states = []
@@ -1365,7 +1371,7 @@ class TSFDQN:
         # with torch.no_grad():
         # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
         next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[torch.arange(a1.shape[0]), a1, :]
-        next_q_value = r_tensor + ((1 - float(done)) * gammas * w_approx(next_target_tsf))
+        # next_q_value = r_tensor + ((1 - float(done)) * gammas * w_approx(next_target_tsf))
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
@@ -1373,13 +1379,13 @@ class TSFDQN:
         r_fit = w_approx(phi_tensor).reshape(-1)
 
         # with torch.no_grad(): tested.
-        # next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
+        next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
         # Different next_tsf 2 July 2024
-        next_tsf = phi_tensor + (1 - float(done)) * gammas * next_target_tsf
+        # next_tsf = phi_tensor + (1 - float(done)) * gammas * next_target_tsf
 
         tsf = torch.sum(successor_features * omegas, axis=1)[torch.arange(a.shape[0]), a ,:]
         # tsf = torch.sum(successor_features * omegas, axis=1) # TODO Update the entire q table
-        q_value = w_approx(tsf)
+        # q_value = w_approx(tsf)
 
         loss_task = lambda input, target: torch.sum((input - target) ** 2).mean()
 
@@ -1387,7 +1393,7 @@ class TSFDQN:
 
         psi_loss_coefficient = torch.tensor(self.hyperparameters['target_psi_fit_loss_coefficient'])
         r_loss_coefficient = torch.tensor(self.hyperparameters['target_r_fit_loss_coefficient'])
-        q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
+        # q_value_loss_coefficient = torch.tensor(self.hyperparameters['target_q_value_loss_coefficient'])
         lasso_coefficient = torch.tensor(self.hyperparameters['omegas_l1_coefficient'])
         ridge_coefficient = torch.tensor(self.hyperparameters['omegas_l2_coefficient'])
         maxent_coefficient = torch.tensor(self.hyperparameters['omegas_maxent_coefficient'])
@@ -1414,7 +1420,7 @@ class TSFDQN:
 
         if self.learn_transformed_function:
             l5 = loss_task(transformed_phi, phi_tensor)
-            # loss += l5
+            loss += l5
 
         optim.zero_grad()
         loss.backward()
