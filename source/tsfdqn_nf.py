@@ -1299,6 +1299,7 @@ class TSFDQN:
 
             s_torch, a, r_tensor, phi_tensor, s1_torch, gammas = replay
             s_torch = s_torch.to(self.device).detach()
+            a = a.to(self.device).detach()
             s1_torch = s1_torch.to(self.device).detach()
             phi_tensor = phi_tensor.to(self.device).detach()
             r_tensor = r_tensor.to(self.device).detach()
@@ -1324,8 +1325,6 @@ class TSFDQN:
         self.h_function.eval()
         # g function eval
         [g.eval() for g in self.g_functions]
-
-
 
         # Transformed States
         t_states = []
