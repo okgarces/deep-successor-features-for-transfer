@@ -1057,7 +1057,7 @@ class TSFDQN:
                     if t % n_test_ev == 0:
                         Rs = []
                         for test_index, test_task in enumerate(test_tasks):
-                            R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, use_gpi_eval_mode=use_gpi_eval_mode)
+                            R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss = self.test_agent(test_task, test_index, learn_omegas=learn_omegas, learn_weights=learn_weights, use_gpi_eval_mode=use_gpi_eval_mode)
                             Rs.append(R)
 
                             self.logger.log({f'eval/target_task_{test_index}/omegas': str(self.omegas[test_index].clone().reshape(-1).detach().cpu().numpy()), 'timesteps': self.total_training_steps})
@@ -1246,7 +1246,7 @@ class TSFDQN:
                         a = torch.argmax(q).item()
             return a
             
-    def test_agent(self, task, test_index, use_gpi_eval_mode='vanilla', learn_omegas=True):
+    def test_agent(self, task, test_index, use_gpi_eval_mode='vanilla', learn_omegas=True, learn_weights=True):
         R = 0.0
         w, optim, scheduler = self.test_tasks_weights[test_index]
         omegas = self.omegas[test_index]
@@ -1265,7 +1265,7 @@ class TSFDQN:
             s1, r, done = task.transition(a)
             s1_enc = self.encoding(s1)
 
-            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, done, eval_step=target_ev_step, scheduler=scheduler, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas)
+            loss_t, psi_loss, phi_loss, q_value_loss, transformed_phi_loss = self.update_test_reward_mapper_omegas(w, omegas, optim, task, test_index, r, s_enc, a, s1_enc, done, eval_step=target_ev_step, scheduler=scheduler, use_gpi_eval_mode=use_gpi_eval_mode, learn_omegas=learn_omegas, learn_weights=learn_weights)
 
             accum_loss += loss_t.item()
             total_phi_loss += phi_loss.item()
@@ -1288,11 +1288,15 @@ class TSFDQN:
 
         return R, accum_loss, total_psi_loss, total_phi_loss, total_q_value_loss, total_transformed_phi_loss
 
-    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, done, eval_step=0, scheduler=None, use_gpi_eval_mode='vanilla', learn_omegas=True):
+    def update_test_reward_mapper_omegas(self, w_approx, omegas, optim, task, test_index, r, s, a, s1, done, eval_step=0, scheduler=None, use_gpi_eval_mode='vanilla', learn_omegas=True, learn_weights=True):
         # GPI modes
         # GPI naive: only argmax_{a} max_{\pi}
         # GPI affine_similarity: argmax_{a} min_{||1-h||} This h could be h(\omega_{i} g^{-i}) or simply h(g^{-i})
         # Vanilla TSF: \sum_{i} \omega_{i}
+
+        if not (learn_weights or learn_weights):
+            loss = torch.tensor(0)
+            return loss, loss, loss, loss, loss
 
         test_buffer = self.test_tasks_buffers[test_index]
 
