@@ -380,6 +380,21 @@ class Planar(nn.Module):
         return torch.nn.Sequential(*flows)
 
 
+class Linear(torch.nn.Module):
+    def __init__(self, input_dim, output_dim, device):
+        super().__init__()
+        self.device = device
+        self.net = torch.nn.Linear(input_dim, output_dim, bias=True, device=self.device)
+
+    def forward(self, s):
+        z = self.net(s)
+        return z
+
+    def inverse(self, z):
+        s = (z - self.net.bias) @ torch.inverse(self.net.weight).T
+        return s
+
+
 class LinearBatchNorm(nn.Module):
     """
     An (invertible) batch normalization layer.
@@ -752,7 +767,7 @@ class TSFDQN:
     def _init_g_function(self, states_dim, output_dim, n_coupling_layers = 0):
 
         if self.invertible_flow == 'linear':
-            g_function = torch.nn.Linear(states_dim, output_dim, bias=True, device=self.device)
+            g_function = Linear(states_dim, output_dim, self.device)
         elif self.invertible_flow == 'realnvp':
             g_function = MaskedAffineFlow.build_flow(states_dim, output_dim, n_affine_flows=n_coupling_layers)
         else:
@@ -1096,7 +1111,7 @@ class TSFDQN:
             if greedy and random.random() <= self.test_epsilon:
                 a = random.randrange(self.n_actions)
             else:
-                if use_gpi_eval_mode != 'argmax_convex':
+                if use_gpi_eval_mode not in ['argmax_convex', 'naive_inverted_states']:
                     successor_features = self.sf.get_successors(s_enc)
 
                 if use_gpi_eval_mode=='naive':
@@ -1228,6 +1243,40 @@ class TSFDQN:
                         a = torch.argmax(q, dim=1).reshape(-1)
                     else:
                         a = torch.argmax(q).item()
+
+                elif use_gpi_eval_mode == 'naive_inverted_states':
+
+                    if self.invertible_flow != 'linear':
+                        raise Exception('Flow not supported.')
+
+                    if self.omegas_std_mode == 'average':
+                        normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+                    if self.omegas_std_mode in ['project_simplex', 'no_constraint']:
+                        normalized_omegas = omegas.clone()
+
+                    t_states = []
+                    for g in self.g_functions:
+                        state = g.inverse(s_enc).unsqueeze(1)
+                        t_states.append(state)
+                    # Unsqueeze to be the same shape as omegas [n_batch, n_tasks, n_actions, n_features]
+                    t_states = torch.concat(t_states, dim=1).unsqueeze(2)
+                    t_states = torch.sum(t_states * (1 / normalized_omegas), axis=1).reshape(s_enc.shape)
+
+                    successor_features = self.sf.get_successors(t_states)
+                    q = w(successor_features)
+
+                    max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+
+                    indices = 0 if len(q.shape) == 0 else np.arange(q.shape[0])
+                    q = q[indices, max_task, :]
+
+                    if has_batch:
+                        a = torch.argmax(q, dim=1).reshape(-1)
+                    else:
+                        a = torch.argmax(q).item()
+
+
+
                 else:
                     # Vanilla
 

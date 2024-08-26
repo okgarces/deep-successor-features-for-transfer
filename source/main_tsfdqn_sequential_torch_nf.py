@@ -99,7 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('-experiment_name', type=str, default=None)
     parser.add_argument('-no_learn_omegas',  default=True, action='store_false')
 
-    parser.add_argument('-use_gpi_eval_mode', type=str, default='vanilla', choices=['vanilla', 'naive', 'affine_similarity', 'affine_similarity_minmax', 'affine_similarity_minmax_expectation', 'argmax_convex', 'augmented_source_tasks'])
+    parser.add_argument('-use_gpi_eval_mode', type=str, default='vanilla', choices=['vanilla', 'naive', 'affine_similarity', 'affine_similarity_minmax', 'affine_similarity_minmax_expectation', 'argmax_convex', 'augmented_source_tasks', 'naive_inverted_states'])
     parser.add_argument('-invertible_flow', type=str, default='planar', choices=['planar', 'realnvp', 'linear'])
     parser.add_argument('-dissimilar', default=False, action='store_true')
 
