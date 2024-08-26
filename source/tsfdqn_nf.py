@@ -1206,6 +1206,28 @@ class TSFDQN:
 
                     if self.total_training_steps % 100_000 == 0:  # In one million only 500 Test steps * target tasks
                         self.logger.log({f'eval/target_task_{test_index}/minmax_expected_task': max_task.item(), 'timesteps': self.total_training_steps})
+                elif use_gpi_eval_mode == 'augmented_source_tasks':
+                    if self.omegas_std_mode == 'average':
+                        normalized_omegas = (omegas / torch.sum(omegas, axis=1, keepdim=True))
+                        tsf = torch.sum(successor_features * normalized_omegas, axis=1, keepdim=True)
+                    if self.omegas_std_mode in ['project_simplex', 'no_constraint']:
+                        tsf = torch.sum(successor_features * omegas, axis=1, keepdim=True)
+
+                    tsf = torch.concat([successor_features, tsf], axis=1)
+
+                    q = w(tsf)
+                    # q = (psi @ w)[:,:,:, 0]  # shape (n_batch, n_tasks, n_actions)
+                    # Target TSF only Use Q-Learning
+
+                    max_task = torch.squeeze(torch.argmax(torch.max(q, axis=2).values, axis=1))  # shape (n_batch,)
+
+                    indices = 0 if len(q.shape) == 0 else np.arange(q.shape[0])
+                    q = q[indices, max_task, :]
+
+                    if has_batch:
+                        a = torch.argmax(q, dim=1).reshape(-1)
+                    else:
+                        a = torch.argmax(q).item()
                 else:
                     # Vanilla
 
@@ -1374,11 +1396,11 @@ class TSFDQN:
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
-        # r_fit_transformed = w_approx(transformed_phi).reshape(-1)
+        # r_fit = w_approx(transformed_phi).reshape(-1)
         r_fit = w_approx(phi_tensor).reshape(-1)
 
-        # with torch.no_grad(): tested.
-        next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
+        with torch.no_grad():
+            next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
         # Different next_tsf 2 July 2024
         # next_tsf = phi_tensor + (1 - float(done)) * gammas * next_target_tsf
 
