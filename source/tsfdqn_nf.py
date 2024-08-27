@@ -1441,11 +1441,20 @@ class TSFDQN:
 
 
         # TODO Remove this. This is to double check that omegas are not being learnt as that suppose to do.
+        is_max_min_ensemble_learning = True
+        if is_max_min_ensemble_learning:
+            next_successor_features = self.sf.get_successors(s1_torch).detach()
+            qs_proxy = w_approx(next_successor_features)[:,:,:,0]
+            min_tasks = torch.argmin(torch.max(qs_proxy, dim=-1).values, dim=1)
+            qs_proxy = qs_proxy[torch.arange(s1_torch.shape[0]), min_tasks, :]
+            max_actions = torch.argmax(qs_proxy, dim=-1)
 
-        # with torch.no_grad():
-        # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
-        next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[torch.arange(a1.shape[0]), a1, :]
-        # next_q_value = r_tensor + ((1 - float(done)) * gammas * w_approx(next_target_tsf))
+            next_target_tsf = next_successor_features[torch.arange(s1_torch.shape[0]), min_tasks, max_actions, :]
+        else:
+            # with torch.no_grad():
+            # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
+            next_target_tsf = torch.sum(next_successor_features * omegas, axis=1)[torch.arange(a1.shape[0]), a1, :]
+            # next_q_value = r_tensor + ((1 - float(done)) * gammas * w_approx(next_target_tsf))
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
