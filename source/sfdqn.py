@@ -552,7 +552,7 @@ class SFDQN:
 
             self.test_tasks_buffers.append(ReplayBuffer(
                 n_samples=int(((cycles_per_task * n_samples * self.T * len(test_tasks)) / n_test_ev) * 0.01),
-                n_batch=32))
+                n_batch=32, device=self.device))
             
         # train each one
         return_data = []
