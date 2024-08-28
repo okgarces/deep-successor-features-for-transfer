@@ -1458,8 +1458,8 @@ class TSFDQN:
 
         # TODO Remove this. Weights are not being learnt properly.
         # TODO change the feature function to fit w.
-        # r_fit = w_approx(transformed_phi).reshape(-1)
-        r_fit = w_approx(phi_tensor).reshape(-1)
+        r_fit = w_approx(transformed_phi).reshape(-1)
+        # r_fit = w_approx(phi_tensor).reshape(-1)
 
         with torch.no_grad():
             next_tsf = transformed_phi + (1 - float(done)) * gammas * next_target_tsf
@@ -1514,7 +1514,6 @@ class TSFDQN:
         # Sum_i omega_i = 1
         with torch.no_grad():
             epsilon = 1e-7
-
             if self.omegas_std_mode == 'average':
                 omegas.clamp_(epsilon)
                 omegas.data = (omegas / torch.sum(omegas, axis=1, keepdim=True)).data
