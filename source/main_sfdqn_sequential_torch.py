@@ -16,7 +16,7 @@ import torch
 from collections import OrderedDict
 
 # read parameters from config file
-config_params = parse_config_file('reacher.cfg')
+config_params = parse_config_file('reacher_dissimilar_nf.cfg')
 
 gen_params = config_params['GENERAL']
 n_samples = gen_params['n_samples']
@@ -96,6 +96,7 @@ if __name__ == '__main__':
     parser.add_argument('-seed', type=int, default=26)
     parser.add_argument('-experiment_name', type=str, default=None)
     parser.add_argument('-dissimilar', default=False, action='store_true')
+    parser.add_argument('-use_target_replay_buffer', default=False, action='store_true')
 
     args = parser.parse_args()
 
@@ -108,7 +109,7 @@ if __name__ == '__main__':
     print('building SFDQN Sequential')
     deep_sf = DeepSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
     sfdqn = SFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device,
-                  **sfdqn_params, **agent_params)
+                  use_target_replay_buffer=args.use_target_replay_buffer, **sfdqn_params, **agent_params)
 
     # train SFDQN
     print('training SFDQN Sequential')

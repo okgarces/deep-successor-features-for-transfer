@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 
+from source.utils.buffer import ReplayBuffer
 from tasks.task import Task
 from utils.torch import update_models_weights
 from utils.logger import get_logger_level
@@ -302,7 +303,7 @@ class DeepSF:
 class SFDQN:
 
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1, epsilon_min=0, print_ev=1000, 
-                 save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, **kwargs):
+                 save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, use_target_replay_buffer = False, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -364,6 +365,11 @@ class SFDQN:
         # Sequential Successor Features
         self.buffers = []
         self.device = device
+
+        # test tasks buffers
+        self.use_target_replay_buffer = use_target_replay_buffer
+        self.test_tasks_buffers = []
+
 
     def set_active_training_task(self, index):
         """
@@ -543,6 +549,10 @@ class SFDQN:
                     'weight_decay': self.hyperparameters['weight_decay_w']},
             optim = torch.optim.Adam(w_hyperparams)
             self.test_tasks_weights.append((w_approx, optim))
+
+            self.test_tasks_buffers.append(ReplayBuffer(
+                n_samples=int(((cycles_per_task * n_samples * self.T * len(test_tasks)) / n_test_ev) * 0.01),
+                n_batch=32))
             
         # train each one
         return_data = []
@@ -606,7 +616,7 @@ class SFDQN:
             s1_enc = self.encoding(s1)
 
             # loss_t = self.update_test_reward_mapper(w, r, s, a, s1).item()
-            loss_t = self.update_test_reward_mapper(w, optim, task, r, s_enc, a, s1_enc).item()
+            loss_t = self.update_test_reward_mapper(w, optim, task, test_index, r, s_enc, a, s1_enc).item()
             accum_loss += loss_t
 
             # Update states
@@ -618,14 +628,27 @@ class SFDQN:
 
         return R, accum_loss
 
-    def update_test_reward_mapper(self, w_approx: torch.nn.Module, optim: torch.optim.Optimizer, task: Task, r: float, s: np.ndarray, a: int, s1: np.ndarray):
+    def update_test_reward_mapper(self, w_approx: torch.nn.Module, optim: torch.optim.Optimizer, task: Task, test_index: int, r: float, s: np.ndarray, a: int, s1: np.ndarray):
         # Return Loss
         phi = task.features(s,a,s1)
         phi_tensor = torch.tensor(phi).float().to(self.device).detach()
         loss_task = torch.nn.MSELoss()
 
-        with torch.no_grad():
-            r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
+        test_buffer = self.test_tasks_buffers[test_index]
+
+        if self.use_target_replay_buffer:
+            if not test_buffer.is_full():
+                test_buffer.append(s, a, r, phi, s1, self.gamma)
+
+            replay = test_buffer.replay()
+
+            if replay is None:
+                return torch.tensor(torch.inf)
+
+            _, _, r_tensor, phi_tensor, *_ = replay
+        else:
+            with torch.no_grad():
+                r_tensor = torch.tensor(r).float().unsqueeze(0).to(self.device)
 
         optim.zero_grad()
 
