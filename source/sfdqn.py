@@ -2,8 +2,8 @@
 import numpy as np
 import torch
 
-from source.utils.buffer import ReplayBuffer
 from tasks.task import Task
+from utils.buffer import ReplayBuffer
 from utils.torch import update_models_weights
 from utils.logger import get_logger_level
 import random
