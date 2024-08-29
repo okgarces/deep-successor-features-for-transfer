@@ -110,6 +110,7 @@ if __name__ == '__main__':
     parser.add_argument('-no_learn_weights', default=True, action='store_false')
     parser.add_argument('-learn_transformed_function', default=False, action='store_true')
     parser.add_argument('-use_target_replay_buffer', default=False, action='store_true')
+    parser.add_argument('-target_tsf_ensemble_mode', default=None, choices=['is_max_min_ensemble_learning', 'is_average_ensemble_learning'])
 
     args = parser.parse_args()
 
@@ -125,7 +126,8 @@ if __name__ == '__main__':
     deep_sf = DeepTSF(pytorch_model_handle=sf_model_lambda, device=device, **sfdqn_params)
     sfdqn = TSFDQN(deep_sf=deep_sf, buffer_handle=replay_buffer_handle, device=device, invertible_flow=args.invertible_flow,
                    omegas_std_mode=args.omegas_std_mode, only_next_states_affine_state=args.only_next_states_affine_state,
-                   learn_transformed_function=args.learn_transformed_function, use_target_replay_buffer=args.use_target_replay_buffer, **sfdqn_params, **agent_params)
+                   learn_transformed_function=args.learn_transformed_function, use_target_replay_buffer=args.use_target_replay_buffer,
+                   target_tsf_ensemble_mode=args.target_tsf_ensemble_mode, **sfdqn_params, **agent_params)
 
     if args.phi_learning:
         # remember g_h_function_dims are h and phi function sould have the same dimension.

@@ -558,7 +558,7 @@ class TSFDQN:
     def __init__(self, deep_sf, buffer_handle, gamma, T, encoding, epsilon=0.1, epsilon_decay=1., epsilon_min=0.,
                  print_ev=1000, save_ev=100, use_gpi=True, test_epsilon=0.03, device=None, invertible_flow='planar',
                  learn_transformed_function=False, learn_omegas_source_task=False, omegas_std_mode='average',
-                 only_next_states_affine_state=False, use_target_replay_buffer=False, **kwargs):
+                 only_next_states_affine_state=False, use_target_replay_buffer=False, target_tsf_ensemble_mode=None, **kwargs):
         """
         Creates a new abstract reinforcement learning agent.
         
@@ -632,6 +632,7 @@ class TSFDQN:
         self.only_next_states_affine_state = only_next_states_affine_state
         self.learn_transformed_function = learn_transformed_function
         self.transformed_phi_function = None
+        self.target_tsf_ensemble_mode = target_tsf_ensemble_mode
 
     # ===========================================================================
     # TASK MANAGEMENT
@@ -1441,15 +1442,14 @@ class TSFDQN:
 
 
         # TODO Remove this. This is to double check that omegas are not being learnt as that suppose to do.
-        is_max_min_ensemble_learning = True
-        if is_max_min_ensemble_learning:
+        if self.target_tsf_ensemble_mode == 'is_max_min_ensemble_learning':
             next_successor_features = self.sf.get_successors(s1_torch).detach()
             qs_proxy = w_approx(next_successor_features)[:,:,:,0]
             min_tasks = torch.argmin(torch.max(qs_proxy, dim=-1).values, dim=1)
-            qs_proxy = qs_proxy[torch.arange(s1_torch.shape[0]), min_tasks, :]
-            max_actions = torch.argmax(qs_proxy, dim=-1)
-
-            next_target_tsf = next_successor_features[torch.arange(s1_torch.shape[0]), min_tasks, max_actions, :]
+            next_target_tsf = next_successor_features[torch.arange(s1_torch.shape[0]), min_tasks, a1, :]
+        elif self.target_tsf_ensemble_mode == 'is_average_ensemble_learning':
+            next_successor_features = self.sf.get_successors(s1_torch).detach()
+            next_target_tsf = next_successor_features.mean(axis=1)[torch.arange(s1_torch.shape[0]), a1, :]
         else:
             # with torch.no_grad():
             # next_target_tsf = torch.sum(next_successor_features * omegas, axis=1) # TODO Update the entire q table.
